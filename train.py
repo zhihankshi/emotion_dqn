@@ -43,16 +43,14 @@ def create_agent(
         return DQNAgent(**common_params)
     
     elif agent_type == 'emotional':
-        # SIMPLIFIED: Only 2 emotional parameters now
+        # Only ONE extra parameter: lambda_mood
         emotional_params = {
-            'lambda_mood': config.get('lambda_mood', 0.95),
-            'beta': config.get('beta', 0.1),
+            'lambda_mood': config.get('lambda_mood', 0.8),
         }
         return EmotionalDQNAgent(**common_params, **emotional_params)
     
     else:
         raise ValueError(f"Unknown agent type: {agent_type}")
-
 
 def train_episode(
     env,

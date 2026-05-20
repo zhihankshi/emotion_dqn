@@ -1,16 +1,19 @@
 """
-Emotional Deep Q-Network Agent (Simplified).
+Emotional Deep Q-Network Agent (Paper-Faithful).
 
-ONLY differs from baseline in Q-value calculation.
-Based on "Emotions as Computations" paper (Section 3.4.1).
+Based on "Emotions as Computations" paper.
 
-Key equation:
-    Q_target = r + γ * max Q(s', a') + β * M
+Paper equation (Section 3.3.2):
+    V̂(s) = V(s) + M
     
-Where M is the mood (running average of TD errors).
+Where M is mood (running average of TD errors).
+
+In Q-learning terms:
+    Q_target = r + γ * max Q(s', a') + γ * M
+
+This is the ONLY difference from baseline DQN.
 """
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
@@ -18,39 +21,55 @@ from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 
 from .dqn import DQNNetwork
-from .replay_buffer import ReplayBuffer  # Same as baseline - no prioritized replay
+from .replay_buffer import ReplayBuffer
+
 
 class MoodTracker:
-    def __init__(self, lambda_mood: float = 0.8):  # Changed from 0.95
+    """
+    Simple mood tracker - running average of TD errors.
+    
+    From paper: "Mood integrates recent reward prediction errors"
+    
+    Update rule:
+        M_t+1 = λ * M_t + (1 - λ) * δ_t
+    
+    Where:
+        M = mood
+        λ = persistence (how slowly mood changes)
+        δ = TD error
+    """
+    
+    def __init__(self, lambda_mood: float = 0.8):
+        """
+        Args:
+            lambda_mood: Persistence of mood.
+                         0.8 = moderate persistence
+                         0.95 = very slow change
+                         0.5 = fast change
+        """
         self.lambda_mood = lambda_mood
         self.mood = 0.0
-        self.mood_history = []
-        self.td_error_history = []
     
     def update(self, td_error: float) -> float:
-        # M = M + (1 - λ)(δ - M)
-        self.mood = self.mood + (1 - self.lambda_mood) * (td_error - self.mood)
+        """
+        Update mood based on TD error.
         
-        # Record history
-        self.mood_history.append(self.mood)
-        self.td_error_history.append(td_error)
+        Args:
+            td_error: Current TD error (δ)
         
-        if len(self.mood_history) > 10000:
-            self.mood_history = self.mood_history[-10000:]
-            self.td_error_history = self.td_error_history[-10000:]
-        
+        Returns:
+            Updated mood value
+        """
+        self.mood = self.lambda_mood * self.mood + (1 - self.lambda_mood) * td_error
         return self.mood
     
     def get_mood(self) -> float:
+        """Get current mood value."""
         return self.mood
     
-    def reset(self, full: bool = False) -> None:
-        """Reset mood - only on full reset, not between episodes."""
-        if full:
-            self.mood = 0.0
-            self.mood_history = []
-            self.td_error_history = []
-        # else: do nothing - mood persists!
+    def reset(self) -> None:
+        """Full reset of mood (only for new training runs)."""
+        self.mood = 0.0
 
 
 class EmotionalDQNAgent:
@@ -58,16 +77,20 @@ class EmotionalDQNAgent:
     DQN agent with emotion-biased Q-value updates.
     
     ONLY DIFFERENCE FROM BASELINE:
-        Q_target = r + γ * max Q(s', a') + β * mood
     
-    Everything else (network, replay, exploration) is identical to baseline.
+        Baseline:  Q_target = r + γ * max Q(s', a')
+        Emotional: Q_target = r + γ * max Q(s', a') + γ * mood
+                                                      ^^^^^^^^^
+                                                      This term added
+    
+    Everything else (network, replay, exploration) is IDENTICAL to baseline.
     """
     
     def __init__(
         self,
         observation_shape: Tuple[int, ...],
         n_actions: int,
-        # Standard DQN params
+        # Standard DQN params (IDENTICAL to baseline)
         learning_rate: float = 1e-4,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
@@ -76,9 +99,8 @@ class EmotionalDQNAgent:
         buffer_size: int = 50000,
         batch_size: int = 32,
         target_update_freq: int = 1000,
-        # Emotion params - UPDATED DEFAULTS
-        lambda_mood: float = 0.8,   # Was 0.95
-        beta: float = 1.0,          # Was 0.1
+        # Emotion param (ONLY new parameter)
+        lambda_mood: float = 0.8,
         # Other
         device: Optional[str] = None,
         seed: Optional[int] = None
@@ -98,7 +120,6 @@ class EmotionalDQNAgent:
             batch_size: Training batch size
             target_update_freq: Steps between target network updates
             lambda_mood: Mood persistence (0-1, higher = more persistent)
-            beta: How much mood biases Q-targets (generalization strength)
             device: 'cuda' or 'cpu'
             seed: Random seed
         """
@@ -113,9 +134,6 @@ class EmotionalDQNAgent:
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_decay_steps
-        
-        # Emotion parameter (ONLY new parameter)
-        self.beta = beta
         
         # Device
         if device is None:
@@ -137,10 +155,10 @@ class EmotionalDQNAgent:
         # Optimizer (SAME as baseline)
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
         
-        # Replay buffer (SAME as baseline - standard replay, not prioritized)
+        # Replay buffer (SAME as baseline)
         self.replay_buffer = ReplayBuffer(capacity=buffer_size, seed=seed)
         
-        # Mood tracker (NEW - but simple)
+        # Mood tracker (NEW - the only addition)
         self.mood_tracker = MoodTracker(lambda_mood=lambda_mood)
         
         # Counters
@@ -151,7 +169,14 @@ class EmotionalDQNAgent:
         """
         Select action using epsilon-greedy policy.
         
-        IDENTICAL to baseline - no emotion-based exploration changes.
+        IDENTICAL to baseline - no emotion-based changes.
+        
+        Args:
+            state: Current observation
+            training: Whether in training mode (uses epsilon-greedy)
+        
+        Returns:
+            Selected action
         """
         if training and np.random.random() < self.epsilon:
             return np.random.randint(self.n_actions)
@@ -169,7 +194,11 @@ class EmotionalDQNAgent:
         next_state: np.ndarray,
         done: bool
     ) -> None:
-        """Store transition in replay buffer (IDENTICAL to baseline)."""
+        """
+        Store transition in replay buffer.
+        
+        IDENTICAL to baseline.
+        """
         self.replay_buffer.push(state, action, reward, next_state, done)
     
     def update(self) -> Optional[Dict[str, float]]:
@@ -177,59 +206,66 @@ class EmotionalDQNAgent:
         Perform one gradient update step.
         
         THIS IS WHERE THE ONLY DIFFERENCE IS:
-            Q_target = r + γ * max Q(s', a') + β * mood
-                                               ^^^^^^^^^^
-                                               This term is added
+        
+            Baseline:  Q_target = r + γ * max Q(s', a')
+            Emotional: Q_target = r + γ * max Q(s', a') + γ * mood
+        
+        Returns:
+            Dictionary of metrics, or None if buffer not ready
         """
         if not self.replay_buffer.is_ready(self.batch_size):
             return None
         
-        # Sample batch (SAME as baseline)
+        # ============================================================
+        # EVERYTHING BELOW IS SAME AS BASELINE UNTIL MARKED
+        # ============================================================
+        
+        # Sample batch
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(
             self.batch_size
         )
         
-        # Convert to tensors (SAME as baseline)
+        # Convert to tensors
         states_t = torch.from_numpy(states).to(self.device)
         actions_t = torch.from_numpy(actions).long().to(self.device)
         rewards_t = torch.from_numpy(rewards).to(self.device)
         next_states_t = torch.from_numpy(next_states).to(self.device)
         dones_t = torch.from_numpy(dones).to(self.device)
         
-        # Current Q values (SAME as baseline)
+        # Current Q values: Q(s, a)
         current_q = self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
         
-        # Target Q values (SAME as baseline)
+        # Next Q values: max_a' Q(s', a')
         with torch.no_grad():
             next_q = self.target_net(next_states_t).max(dim=1)[0]
+            
+            # Standard target: r + γ * max Q(s', a')
             standard_target = rewards_t + self.gamma * next_q * (1 - dones_t)
         
-        # TD error (computed BEFORE adding mood bias)
+        # TD error (computed before mood adjustment)
         td_error = (standard_target - current_q).mean().item()
         
         # Update mood based on TD error
         current_mood = self.mood_tracker.update(td_error)
-
-        # DEBUG - print every 500 updates
-        if self.updates % 500 == 0:
-            print(f"    [DEBUG] Update {self.updates}: TD={td_error:+.4f}, "
-                f"Mood={current_mood:+.4f}, Beta={self.beta}, Bias={self.beta * current_mood:+.4f}")
         
         # ============================================================
         # THIS IS THE ONLY DIFFERENCE FROM BASELINE
         # ============================================================
-        # Add mood bias to target (emotion-biased value update)
-        # From paper: V̂(s) = V̂(s) + η*δ + (1-η)*M
-        # We implement as: Q_target = standard_target + β * mood
-        # ============================================================
-        mood_bias = self.beta * current_mood
-        biased_target = standard_target + mood_bias
+        # Paper: V̂(s) = V(s) + M
+        # Therefore: Q_target = r + γ * max Q(s', a') + γ * M
         # ============================================================
         
-        # Loss (using biased target)
-        loss = F.mse_loss(current_q, biased_target)
+        mood_bias = self.gamma * current_mood
+        emotional_target = standard_target + mood_bias
         
-        # Optimize (SAME as baseline)
+        # ============================================================
+        # EVERYTHING BELOW IS SAME AS BASELINE
+        # ============================================================
+        
+        # Loss
+        loss = F.mse_loss(current_q, emotional_target)
+        
+        # Optimize
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
@@ -237,7 +273,7 @@ class EmotionalDQNAgent:
         
         self.updates += 1
         
-        # Update target network (SAME as baseline)
+        # Update target network
         if self.updates % self.target_update_freq == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
         
@@ -258,14 +294,24 @@ class EmotionalDQNAgent:
         done: bool
     ) -> Optional[Dict[str, float]]:
         """
-        Complete step: store transition, update, decay epsilon.
+        Complete step: store transition, update network, decay epsilon.
+        
+        Args:
+            state: Current state
+            action: Action taken
+            reward: Reward received
+            next_state: Next state
+            done: Whether episode ended
+        
+        Returns:
+            Update metrics or None
         """
         self.steps += 1
         
-        # Store transition
+        # Store transition (SAME as baseline)
         self.store_transition(state, action, reward, next_state, done)
         
-        # Update
+        # Update network
         metrics = self.update()
         
         # Decay epsilon (SAME as baseline)
@@ -273,12 +319,16 @@ class EmotionalDQNAgent:
         
         if metrics:
             metrics['epsilon'] = self.epsilon
-            metrics['buffer_size'] = len(self.replay_buffer)
         
         return metrics
     
     def reset_episode(self) -> None:
-        # Don't reset mood - it should persist across episodes
+        """
+        Reset for new episode.
+        
+        Mood PERSISTS across episodes - this is intentional.
+        From paper: mood is a persistent state that generalizes.
+        """
         pass
     
     def get_mood(self) -> float:
@@ -308,6 +358,7 @@ class EmotionalDQNAgent:
             'updates': self.updates,
             'epsilon': self.epsilon,
             'mood': self.mood_tracker.get_mood(),
+            'lambda_mood': self.mood_tracker.lambda_mood,
         }, path)
     
     def load(self, path: str) -> None:
@@ -323,46 +374,65 @@ class EmotionalDQNAgent:
         self.mood_tracker.mood = checkpoint.get('mood', 0.0)
 
 
-# Quick test
+# ============================================================
+# TEST
+# ============================================================
 if __name__ == "__main__":
-    print("Testing Simplified Emotional DQN Agent...")
     print("=" * 60)
-    print("ONLY DIFFERENCE FROM BASELINE:")
-    print("  Q_target = r + γ * max Q(s', a') + β * mood")
+    print("PAPER-FAITHFUL EMOTIONAL DQN")
+    print("=" * 60)
+    print()
+    print("From 'Emotions as Computations' paper:")
+    print("  V̂(s) = V(s) + M")
+    print()
+    print("In Q-learning:")
+    print("  Q_target = r + γ * max Q(s', a') + γ * mood")
+    print()
+    print("This is the ONLY difference from baseline.")
     print("=" * 60)
     
     # Create agent
     agent = EmotionalDQNAgent(
         observation_shape=(64, 64, 3),
         n_actions=4,
+        gamma=0.99,
+        lambda_mood=0.8,
         buffer_size=1000,
         batch_size=32,
-        lambda_mood=0.95,
-        beta=0.1,
         seed=42
     )
     
-    print(f"\nDevice: {agent.device}")
-    print(f"Beta (mood influence): {agent.beta}")
+    print(f"\nAgent created:")
+    print(f"  Device: {agent.device}")
+    print(f"  Gamma: {agent.gamma}")
+    print(f"  Lambda mood: {agent.mood_tracker.lambda_mood}")
+    print(f"  Mood bias formula: {agent.gamma} * mood")
     
-    # Fill buffer
+    # Fill buffer with random transitions
     print("\nFilling replay buffer...")
     for i in range(100):
         state = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
         action = np.random.randint(4)
-        reward = np.random.randn()
+        reward = np.random.choice([-0.5, -0.04, 1.0, 2.0, 10.0], p=[0.1, 0.7, 0.1, 0.05, 0.05])
         next_state = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
-        done = i % 20 == 0
+        done = np.random.random() < 0.05
         
         agent.store_transition(state, action, reward, next_state, done)
     
-    # Test updates
-    print("\nRunning updates...")
-    for i in range(10):
-        metrics = agent.update()
-        if metrics and i % 3 == 0:
-            print(f"  Update {i}: TD={metrics['td_error']:+.4f}, "
-                  f"Mood={metrics['mood']:+.4f}, Bias={metrics['mood_bias']:+.4f}")
+    print(f"  Buffer size: {len(agent.replay_buffer)}")
     
-    print(f"\nFinal mood: {agent.get_mood():.4f}")
-    print("\n✓ Simplified Emotional DQN works!")
+    # Run some updates
+    print("\nRunning updates...")
+    print("-" * 60)
+    print(f"{'Update':<8} {'TD Error':<12} {'Mood':<12} {'Mood Bias':<12}")
+    print("-" * 60)
+    
+    for i in range(20):
+        metrics = agent.update()
+        if metrics and i % 4 == 0:
+            print(f"{i:<8} {metrics['td_error']:+.6f}    {metrics['mood']:+.6f}    {metrics['mood_bias']:+.6f}")
+    
+    print("-" * 60)
+    print(f"\nFinal mood: {agent.get_mood():+.6f}")
+    print(f"Final mood bias: {agent.gamma * agent.get_mood():+.6f}")
+    print("\n✓ Paper-faithful emotional DQN working!")

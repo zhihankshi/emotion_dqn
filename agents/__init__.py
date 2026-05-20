@@ -1,15 +1,12 @@
 """Agents module."""
-from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from .replay_buffer import ReplayBuffer
 from .dqn import DQNAgent, DQNNetwork
-from .mood_system import MoodSystem, EmotionState
-from .emotional_dqn import EmotionalDQNAgent
+from .emotional_dqn import EmotionalDQNAgent, MoodTracker
 
 __all__ = [
     'ReplayBuffer',
-    'PrioritizedReplayBuffer',
     'DQNAgent',
     'DQNNetwork',
-    'MoodSystem',
-    'EmotionState',
     'EmotionalDQNAgent',
+    'MoodTracker',
 ]

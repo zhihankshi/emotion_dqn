@@ -242,8 +242,6 @@ def main():
     # Emotional parameters - UPDATED DEFAULTS
     parser.add_argument('--lambda_mood', type=float, default=0.8,
                        help='Mood persistence (0-1, higher = slower change)')
-    parser.add_argument('--beta', type=float, default=1.0,
-                       help='Mood influence on Q-targets')
     
     args = parser.parse_args()
     
@@ -255,7 +253,6 @@ def main():
         'batch_size': args.batch_size,
         'epsilon_decay_steps': args.epsilon_decay,
         'lambda_mood': args.lambda_mood,
-        'beta': args.beta,
     }
     
     if args.quick_test:
