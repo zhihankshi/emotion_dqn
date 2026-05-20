@@ -1,0 +1,36 @@
+{
+  "run_info": {
+    "agent_type": "baseline",
+    "maze_name": "minimal",
+    "run_id": 1,
+    "start_time": "2026-04-22T15:59:37.549511",
+    "end_time": "2026-04-22T16:05:30.560241"
+  },
+  "summary": {
+    "total_episodes": 300,
+    "success_rate": 1.0,
+    "avg_steps": 18.16,
+    "avg_reward": 12.117600000000005,
+    "first_success": 0,
+    "total_successes": 284,
+    "avg_key_found_step": 6.44,
+    "avg_door_attempts_without_key": 0.0
+  },
+  "run_metrics": {
+    "run_id": 1,
+    "agent_type": "baseline",
+    "maze_name": "minimal",
+    "total_episodes": 300,
+    "first_success_episode": 0,
+    "total_successes": 284,
+    "final_success_rate": 1.0,
+    "final_avg_steps": 18.16,
+    "final_avg_reward": 12.117600000000005,
+    "episodes_to_50_percent_success": 100,
+    "episodes_to_90_percent_success": 100,
+    "avg_door_attempts_before_first_key": 1.8,
+    "avg_key_found_step": 21.498327759197323,
+    "avg_exploration_boosts_per_episode": 0.0,
+    "total_mood_bias_applied": 0.0
+  }
+}
