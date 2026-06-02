@@ -222,6 +222,8 @@ def main():
                        help='Device (cuda/cpu)')
     parser.add_argument('--log_dir', type=str, default='experiments',
                        help='Directory for experiment logs')
+    parser.add_argument('--eta', type=float, default=0.9,
+                   help='Balance between TD and mood (0.9 = 90% TD, 10% mood)')
     
     # Quick test mode
     parser.add_argument('--quick_test', action='store_true',
@@ -253,6 +255,7 @@ def main():
         'batch_size': args.batch_size,
         'epsilon_decay_steps': args.epsilon_decay,
         'lambda_mood': args.lambda_mood,
+        'eta': args.eta,
     }
     
     if args.quick_test:
