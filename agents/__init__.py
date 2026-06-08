@@ -2,6 +2,7 @@
 from .replay_buffer import ReplayBuffer
 from .dqn import DQNAgent, DQNNetwork
 from .emotional_dqn import EmotionalDQNAgent, MoodTracker
+from .small_dqn import SmallDQNNetwork
 
 __all__ = [
     'ReplayBuffer',
@@ -9,4 +10,5 @@ __all__ = [
     'DQNNetwork',
     'EmotionalDQNAgent',
     'MoodTracker',
+    'SmallDQNNetwork',
 ]

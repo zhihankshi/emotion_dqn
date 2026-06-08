@@ -71,10 +71,11 @@ class EmotionalDQNAgent:
         target_update_freq: int = 1000,
         # Emotion params
         lambda_mood: float = 0.8,
-        eta: float = 0.9,  # NEW: balance between TD and mood
+        eta: float = 0.9,
         # Other
         device: Optional[str] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        network_class=None
     ):
         """
         Initialize Emotional DQN agent.
@@ -84,13 +85,14 @@ class EmotionalDQNAgent:
                  0.9 = 90% TD error, 10% mood
                  1.0 = pure TD learning (standard DQN)
                  0.5 = equal weight
+            network_class: Network class to use (default: DQNNetwork)
         """
         self.observation_shape = observation_shape
         self.n_actions = n_actions
         self.gamma = gamma
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
-        self.eta = eta  # NEW parameter
+        self.eta = eta
         
         # Exploration
         self.epsilon = epsilon_start
@@ -109,11 +111,13 @@ class EmotionalDQNAgent:
             torch.manual_seed(seed)
             np.random.seed(seed)
         
-        # Networks (policy and TARGET - addressing feedback #2)
-        self.policy_net = DQNNetwork(observation_shape, n_actions).to(self.device)
-        self.target_net = DQNNetwork(observation_shape, n_actions).to(self.device)
+        # Networks
+        if network_class is None:
+            network_class = DQNNetwork
+        self.policy_net = network_class(observation_shape, n_actions).to(self.device)
+        self.target_net = network_class(observation_shape, n_actions).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval()  # Target net is always in eval mode
+        self.target_net.eval()
         
         # Optimizer
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
@@ -286,6 +290,28 @@ class EmotionalDQNAgent:
             'lambda_mood': self.mood_tracker.lambda_mood,
             'eta': self.eta,
         }, path)
+
+    def save_checkpoint(self, path: str, episode: int) -> None:
+        """Save lightweight checkpoint for policy analysis at a training stage."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        torch.save({
+            'policy_net': self.policy_net.state_dict(),
+            'epsilon': self.epsilon,
+            'episode': episode,
+            'mood': self.mood_tracker.mood,
+            'agent_type': 'emotional',
+        }, path)
+
+    def load_checkpoint(self, path: str) -> int:
+        """Load policy checkpoint. Returns the saved episode number."""
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+
+        self.policy_net.load_state_dict(checkpoint['policy_net'])
+        self.epsilon = checkpoint['epsilon']
+        self.mood_tracker.mood = checkpoint.get('mood', 0.0)
+        return int(checkpoint['episode'])
     
     def load(self, path: str) -> None:
         """Load agent."""

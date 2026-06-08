@@ -109,7 +109,8 @@ class DQNAgent:
         batch_size: int = 32,
         target_update_freq: int = 1000,
         device: Optional[str] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        network_class=None
     ):
         """
         Initialize DQN agent.
@@ -127,6 +128,7 @@ class DQNAgent:
             target_update_freq: Steps between target network updates
             device: 'cuda' or 'cpu' (auto-detect if None)
             seed: Random seed
+            network_class: Network class to use (default: DQNNetwork)
         """
         self.observation_shape = observation_shape
         self.n_actions = n_actions
@@ -152,8 +154,10 @@ class DQNAgent:
             np.random.seed(seed)
         
         # Networks
-        self.policy_net = DQNNetwork(observation_shape, n_actions).to(self.device)
-        self.target_net = DQNNetwork(observation_shape, n_actions).to(self.device)
+        if network_class is None:
+            network_class = DQNNetwork
+        self.policy_net = network_class(observation_shape, n_actions).to(self.device)
+        self.target_net = network_class(observation_shape, n_actions).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         
@@ -307,6 +311,26 @@ class DQNAgent:
             'updates': self.updates,
             'epsilon': self.epsilon,
         }, path)
+
+    def save_checkpoint(self, path: str, episode: int) -> None:
+        """Save lightweight checkpoint for policy analysis at a training stage."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        torch.save({
+            'policy_net': self.policy_net.state_dict(),
+            'epsilon': self.epsilon,
+            'episode': episode,
+            'agent_type': 'baseline',
+        }, path)
+
+    def load_checkpoint(self, path: str) -> int:
+        """Load policy checkpoint. Returns the saved episode number."""
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+
+        self.policy_net.load_state_dict(checkpoint['policy_net'])
+        self.epsilon = checkpoint['epsilon']
+        return int(checkpoint['episode'])
     
     def load(self, path: str) -> None:
         """Load agent from file."""

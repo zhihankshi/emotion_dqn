@@ -66,8 +66,8 @@ def list_available_mazes(mazes_dir: str = None) -> List[str]:
 def _validate_maze_config(config: Dict[str, Any], maze_name: str) -> None:
     """Validate that maze config has all required fields."""
     required_fields = [
-        'name', 'size', 'agent_start', 'key_position', 
-        'door_position', 'goal_position', 'walls', 'rewards', 'colors'
+        'name', 'size', 'agent_start',
+        'goal_position', 'walls', 'rewards', 'colors'
     ]
     
     for field in required_fields:
@@ -85,13 +85,16 @@ def _validate_maze_config(config: Dict[str, Any], maze_name: str) -> None:
     # Validate positions are within bounds
     positions = {
         'agent_start': config['agent_start'],
-        'key_position': config['key_position'],
-        'door_position': config['door_position'],
-        'goal_position': config['goal_position']
+        'goal_position': config['goal_position'],
     }
-    
+    for optional_pos in ('key_position', 'door_position',
+                         'shield_position', 'trap_position'):
+        val = config.get(optional_pos)
+        if val is not None:
+            positions[optional_pos] = val
+
     for name, pos in positions.items():
-        if len(pos) != 2:
+        if pos is None or len(pos) != 2:
             raise ValueError(f"{name} must be [row, col], got: {pos}")
         if not (0 <= pos[0] < rows and 0 <= pos[1] < cols):
             raise ValueError(
@@ -129,12 +132,22 @@ def create_maze_grid(config: Dict[str, Any]) -> List[List[str]]:
         grid[trap[0]][trap[1]] = 'T'
     
     # Place special locations
-    r, c = config['key_position']
-    grid[r][c] = 'K'
+    if config.get('key_position') is not None:
+        r, c = config['key_position']
+        grid[r][c] = 'K'
     
-    r, c = config['door_position']
-    grid[r][c] = 'D'
-    
+    if config.get('door_position') is not None:
+        r, c = config['door_position']
+        grid[r][c] = 'D'
+
+    if config.get('shield_position') is not None:
+        r, c = config['shield_position']
+        grid[r][c] = 'S'
+
+    if config.get('trap_position') is not None:
+        r, c = config['trap_position']
+        grid[r][c] = 'T'
+
     r, c = config['goal_position']
     grid[r][c] = 'G'
     
@@ -156,7 +169,7 @@ def print_maze(config: Dict[str, Any]) -> None:
         print("|" + " ".join(row) + "|")
     
     print("-" * (config['size'][1] * 2 + 1))
-    print("Legend: A=agent, K=key, D=door, G=goal, #=wall, T=trap")
+    print("Legend: A=agent, K=key, D=door, G=goal, #=wall, T=trap, S=shield")
 
 
 # Quick test

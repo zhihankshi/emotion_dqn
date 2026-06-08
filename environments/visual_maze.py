@@ -13,13 +13,14 @@ from .renderer import MazeRenderer
 
 class VisualMazeEnv(gym.Env):
     """
-    Visual maze environment where agent must find key to open door to reach goal.
+    Visual maze environment with key, optional door, and goal.
     
     Observations are RGB pixel images.
     Actions are discrete: 0=up, 1=down, 2=left, 3=right
     
-    The agent must learn the causal relationship:
-    key -> door opens -> goal accessible
+    Classic mazes: key -> door opens -> goal (key_required default True).
+    Optional-key mazes: goal reachable without key; holding key may boost
+    goal reward (goal_with_key). door_position may be null (no door).
     """
     
     metadata = {"render_modes": ["rgb_array", "human"]}
@@ -68,10 +69,26 @@ class VisualMazeEnv(gym.Env):
         self.trap_set = set(tuple(t) for t in self.config.get('traps', []))
         
         # Special positions
-        self.key_pos = tuple(self.config['key_position'])
-        self.door_pos = tuple(self.config['door_position'])
+        key_raw = self.config.get('key_position')
+        self.has_key_mechanic = key_raw is not None
+        self.key_pos = tuple(key_raw) if self.has_key_mechanic else None
         self.goal_pos = tuple(self.config['goal_position'])
-        
+
+        door_raw = self.config.get('door_position')
+        self.has_door = door_raw is not None
+        self.door_pos = tuple(door_raw) if self.has_door else None
+
+        self.key_required = self.config.get('key_required', True)
+
+        # Shield/trap mechanic
+        shield_raw = self.config.get('shield_position')
+        self.has_shield_mechanic = shield_raw is not None
+        self.shield_pos = tuple(shield_raw) if self.has_shield_mechanic else None
+
+        trap_raw = self.config.get('trap_position')
+        self.has_trap_mechanic = trap_raw is not None
+        self.trap_pos = tuple(trap_raw) if self.has_trap_mechanic else None
+
         # Rewards
         self.rewards = self.config['rewards']
         self.max_steps = self.config.get('max_steps', 200)
@@ -80,11 +97,15 @@ class VisualMazeEnv(gym.Env):
         self.agent_pos = None
         self.has_key = False
         self.door_open = False
+        self.has_shield = False
+        self.shield_consumed = False
         self.steps = 0
         
         # Metrics for causal understanding
         self.door_attempts_without_key = 0
         self.key_pickup_step = -1
+        self.shield_pickup_step = -1
+        self.trap_hit_step = -1
         
         # Define spaces
         self.action_space = spaces.Discrete(4)
@@ -116,11 +137,15 @@ class VisualMazeEnv(gym.Env):
         self.agent_pos = list(self.config['agent_start'])
         self.has_key = False
         self.door_open = False
+        self.has_shield = False
+        self.shield_consumed = False
         self.steps = 0
         
         # Reset metrics
         self.door_attempts_without_key = 0
         self.key_pickup_step = -1
+        self.shield_pickup_step = -1
+        self.trap_hit_step = -1
         
         # Get observation
         obs = self._get_observation()
@@ -153,53 +178,67 @@ class VisualMazeEnv(gym.Env):
         
         # Check boundaries
         if not (0 <= new_row < self.rows and 0 <= new_col < self.cols):
-            # Hit boundary - stay in place, small penalty
             reward += self.rewards['wall_bump']
         
         # Check wall collision
         elif new_pos in self.wall_set:
-            # Hit wall - stay in place, small penalty
             reward += self.rewards['wall_bump']
         
-        # Check trap
+        # Check conditional trap (shield/trap mechanic)
+        elif self.has_trap_mechanic and new_pos == self.trap_pos:
+            self.agent_pos = [new_row, new_col]
+            if self.has_shield:
+                reward += self.rewards['trap_with_shield']
+                self.has_shield = False
+                self.shield_consumed = True
+            else:
+                reward += self.rewards['trap_no_shield']
+            if self.trap_hit_step == -1:
+                self.trap_hit_step = self.steps
+        
+        # Check simple traps (flat penalty list)
         elif new_pos in self.trap_set:
-            # Hit trap - move there but take damage
             self.agent_pos = [new_row, new_col]
             reward += self.rewards['trap']
         
         # Check door (special case)
-        elif new_pos == self.door_pos:
+        elif self.has_door and new_pos == self.door_pos:
             if self.has_key:
-                # Have key - can pass through door
                 self.agent_pos = [new_row, new_col]
                 if not self.door_open:
-                    # First time opening door
                     self.door_open = True
                     reward += self.rewards['door_open']
             else:
-                # No key - blocked by door
                 self.door_attempts_without_key += 1
                 reward += self.rewards['door_without_key']
-                # Stay in place
         
         # Normal move
         else:
             self.agent_pos = [new_row, new_col]
         
+        # Check shield pickup
+        if (self.has_shield_mechanic
+                and tuple(self.agent_pos) == self.shield_pos
+                and not self.has_shield
+                and not self.shield_consumed):
+            self.has_shield = True
+            self.shield_pickup_step = self.steps
+        
         # Check key pickup
-        if tuple(self.agent_pos) == self.key_pos and not self.has_key:
+        if (self.has_key_mechanic
+                and tuple(self.agent_pos) == self.key_pos
+                and not self.has_key):
             self.has_key = True
             self.key_pickup_step = self.steps
             reward += self.rewards['key']
         
         # Check goal
-        if tuple(self.agent_pos) == self.goal_pos:
-            if self.door_open:
-                # Success! Reached goal after opening door
+        if tuple(self.agent_pos) == self.goal_pos and self._can_complete_goal():
+            if self.has_key and 'goal_with_key' in self.rewards:
+                reward += self.rewards['goal_with_key']
+            else:
                 reward += self.rewards['goal']
-                terminated = True
-            # If door not open, agent shouldn't be able to reach goal
-            # (maze design should prevent this)
+            terminated = True
         
         # Check truncation (timeout)
         truncated = self.steps >= self.max_steps
@@ -210,12 +249,22 @@ class VisualMazeEnv(gym.Env):
         
         return obs, reward, terminated, truncated, info
     
+    def _can_complete_goal(self) -> bool:
+        """Whether standing on the goal cell ends the episode successfully."""
+        if self.key_required and not self.has_key:
+            return False
+        if self.has_door and not self.door_open:
+            return False
+        return True
+
     def _get_observation(self) -> np.ndarray:
         """Render current state to pixel observation."""
         return self.renderer.render(
             agent_pos=self.agent_pos,
             has_key=self.has_key,
-            door_open=self.door_open
+            door_open=self.door_open,
+            has_shield=self.has_shield,
+            shield_consumed=self.shield_consumed
         )
     
     def _get_info(self) -> Dict[str, Any]:
@@ -224,9 +273,15 @@ class VisualMazeEnv(gym.Env):
             'agent_pos': tuple(self.agent_pos),
             'has_key': self.has_key,
             'door_open': self.door_open,
+            'has_door': self.has_door,
+            'key_required': self.key_required,
+            'has_shield': self.has_shield,
+            'shield_consumed': self.shield_consumed,
             'steps': self.steps,
             'door_attempts_without_key': self.door_attempts_without_key,
             'key_pickup_step': self.key_pickup_step,
+            'shield_pickup_step': self.shield_pickup_step,
+            'trap_hit_step': self.trap_hit_step,
             'maze_name': self.maze_name
         }
     
@@ -247,12 +302,18 @@ class VisualMazeEnv(gym.Env):
     
     def get_state_summary(self) -> str:
         """Get human-readable state summary."""
-        return (
-            f"Step {self.steps}: "
-            f"pos={tuple(self.agent_pos)}, "
-            f"has_key={self.has_key}, "
-            f"door_open={self.door_open}"
-        )
+        parts = [
+            f"Step {self.steps}:",
+            f"pos={tuple(self.agent_pos)}",
+        ]
+        if self.has_key_mechanic:
+            parts.append(f"has_key={self.has_key}")
+        if self.has_door:
+            parts.append(f"door_open={self.door_open}")
+        if self.has_shield_mechanic:
+            parts.append(f"has_shield={self.has_shield}")
+            parts.append(f"shield_consumed={self.shield_consumed}")
+        return " ".join(parts)
     
     def close(self):
         """Clean up resources."""

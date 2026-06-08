@@ -40,12 +40,20 @@ class MazeRenderer:
         # Precompute wall positions as set for fast lookup
         self.wall_set = set(tuple(w) for w in config['walls'])
         self.trap_set = set(tuple(t) for t in config.get('traps', []))
+        
+        # Shield/trap mechanic positions (singular, conditional penalty)
+        shield_raw = config.get('shield_position')
+        self.shield_pos = tuple(shield_raw) if shield_raw is not None else None
+        trap_raw = config.get('trap_position')
+        self.trap_pos = tuple(trap_raw) if trap_raw is not None else None
     
     def render(
         self,
         agent_pos: List[int],
         has_key: bool,
-        door_open: bool
+        door_open: bool,
+        has_shield: bool = False,
+        shield_consumed: bool = False
     ) -> np.ndarray:
         """
         Render current maze state to RGB image.
@@ -54,6 +62,8 @@ class MazeRenderer:
             agent_pos: Current agent position [row, col]
             has_key: Whether agent has picked up the key
             door_open: Whether door is open
+            has_shield: Whether agent currently holds the shield
+            shield_consumed: Whether the shield has been used up
         
         Returns:
             RGB image as numpy array of shape (image_size, image_size, 3)
@@ -65,7 +75,8 @@ class MazeRenderer:
         # Draw each cell
         for row in range(self.rows):
             for col in range(self.cols):
-                self._draw_cell(img, row, col, agent_pos, has_key, door_open)
+                self._draw_cell(img, row, col, agent_pos, has_key, door_open,
+                                has_shield, shield_consumed)
         
         return img
     
@@ -76,7 +87,9 @@ class MazeRenderer:
         col: int,
         agent_pos: List[int],
         has_key: bool,
-        door_open: bool
+        door_open: bool,
+        has_shield: bool = False,
+        shield_consumed: bool = False
     ) -> None:
         """Draw a single cell on the image."""
         # Calculate pixel coordinates
@@ -96,11 +109,27 @@ class MazeRenderer:
             color = self.colors['wall']
         elif pos in self.trap_set:
             color = self.colors['trap']
+        elif self.trap_pos is not None and pos == self.trap_pos:
+            color = self.colors['trap']
         elif list(pos) == self.config['goal_position']:
             color = self.colors['goal']
-        elif list(pos) == self.config['door_position']:
+        elif (
+            self.config.get('door_position') is not None
+            and list(pos) == self.config['door_position']
+        ):
             color = self.colors['door_open'] if door_open else self.colors['door_locked']
-        elif list(pos) == self.config['key_position'] and not has_key:
+        elif (
+            self.shield_pos is not None
+            and pos == self.shield_pos
+            and not has_shield
+            and not shield_consumed
+        ):
+            color = self.colors['shield']
+        elif (
+            self.config.get('key_position') is not None
+            and list(pos) == self.config['key_position']
+            and not has_key
+        ):
             color = self.colors['key']
         else:
             color = self.colors['floor']
@@ -110,7 +139,6 @@ class MazeRenderer:
         
         # Draw agent on top if present
         if list(pos) == list(agent_pos):
-            # Draw agent as smaller square in center of cell
             margin = self.cell_size // 4
             ay1 = y1 + margin
             ay2 = y2 - margin
@@ -122,7 +150,9 @@ class MazeRenderer:
         self,
         agent_pos: List[int],
         has_key: bool,
-        door_open: bool
+        door_open: bool,
+        has_shield: bool = False,
+        shield_consumed: bool = False
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
         Render and return additional debug info.
@@ -130,12 +160,15 @@ class MazeRenderer:
         Returns:
             Tuple of (image, info_dict)
         """
-        img = self.render(agent_pos, has_key, door_open)
+        img = self.render(agent_pos, has_key, door_open,
+                          has_shield, shield_consumed)
         
         info = {
             'agent_pos': agent_pos,
             'has_key': has_key,
             'door_open': door_open,
+            'has_shield': has_shield,
+            'shield_consumed': shield_consumed,
             'cell_size': self.cell_size,
             'image_size': self.image_size
         }

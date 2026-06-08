@@ -8,11 +8,50 @@ import torch
 from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 
 from environments import VisualMazeEnv
-from agents import DQNAgent, EmotionalDQNAgent
+from agents import DQNAgent, EmotionalDQNAgent, DQNNetwork, SmallDQNNetwork
 from utils import EpisodeMetrics, MetricsLogger
+
+# Extra analysis checkpoints (1-based episode numbers)
+ANALYSIS_CHECKPOINT_EPISODES = {60, 80, 100, 150, 200, 250, 300, 400, 500}
+
+
+def get_checkpoint_episodes(
+    n_episodes: int,
+    checkpoint_interval: int,
+) -> Set[int]:
+    """Return 1-based episode numbers where checkpoints should be saved."""
+    episodes = set(ANALYSIS_CHECKPOINT_EPISODES)
+    for ep in range(checkpoint_interval, n_episodes + 1, checkpoint_interval):
+        episodes.add(ep)
+    return {ep for ep in episodes if ep <= n_episodes}
+
+
+def should_save_checkpoint(
+    episode_num: int,
+    checkpoint_episodes: Set[int],
+) -> bool:
+    """Whether to save a checkpoint after completing this 1-based episode."""
+    return episode_num in checkpoint_episodes
+
+
+def resolve_epsilon_decay_steps(
+    n_episodes: int,
+    max_steps_per_episode: int,
+    config: Dict[str, Any],
+) -> int:
+    """
+    Steps over which epsilon linearly decays from start to end.
+
+    Default: full training run = n_episodes * max_steps_per_episode.
+    Override by setting config['epsilon_decay_steps'] or --epsilon_decay.
+    """
+    if config.get("epsilon_decay_steps") is not None:
+        return int(config["epsilon_decay_steps"])
+    return n_episodes * max_steps_per_episode
+
 
 def create_agent(
     agent_type: str,
@@ -20,7 +59,8 @@ def create_agent(
     n_actions: int,
     config: Dict[str, Any],
     device: str,
-    seed: int
+    seed: int,
+    network_class=None
 ):
     """Create agent based on type."""
     
@@ -37,13 +77,13 @@ def create_agent(
         'target_update_freq': config.get('target_update_freq', 1000),
         'device': device,
         'seed': seed,
+        'network_class': network_class,
     }
     
     if agent_type == 'baseline':
         return DQNAgent(**common_params)
     
     elif agent_type == 'emotional':
-        # Only ONE extra parameter: lambda_mood
         emotional_params = {
             'lambda_mood': config.get('lambda_mood', 0.8),
         }
@@ -103,8 +143,8 @@ def train_episode(
         
         obs = next_obs
     
-    # Record success
-    metrics.success = terminated and info.get('door_open', False)
+    # Record success (terminated = reached goal/exit, truncated = timeout)
+    metrics.success = terminated
     
     # Average metrics
     if losses:
@@ -126,97 +166,6 @@ def train_episode(
         agent.reset_episode()
     
     return metrics
-    """
-    Run a single training episode.
-    
-    Returns:
-        EpisodeMetrics for this episode
-    """
-    obs, info = env.reset()
-    
-    metrics = EpisodeMetrics(episode=episode_num)
-    
-    # Accumulators for averaging
-    losses = []
-    td_errors = []
-    q_values = []
-    mood_values = []
-    mood_actions = []
-    overall_moods = []
-    mood_biases = []
-    
-    done = False
-    
-    while not done:
-        # Select action
-        action = agent.select_action(obs, training=training)
-        
-        # Take step
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        
-        metrics.total_reward += reward
-        metrics.steps += 1
-        
-        # Track causal understanding
-        if info['has_key'] and metrics.key_found_step == -1:
-            metrics.key_found_step = metrics.steps
-        
-        if info['door_open'] and metrics.door_opened_step == -1:
-            metrics.door_opened_step = metrics.steps
-        
-        metrics.door_attempts_without_key = info['door_attempts_without_key']
-        
-        # Update agent
-        if training:
-            update_metrics = agent.step(obs, action, reward, next_obs, done)
-            
-            if update_metrics:
-                losses.append(update_metrics.get('loss', 0))
-                td_errors.append(update_metrics.get('td_error_mean', 0))
-                q_values.append(update_metrics.get('q_value_mean', 0))
-                
-                # Emotional metrics
-                if 'mood_value' in update_metrics:
-                    mood_values.append(update_metrics['mood_value'])
-                    mood_actions.append(update_metrics['mood_action'])
-                    overall_moods.append(update_metrics['overall_mood'])
-                    mood_biases.append(update_metrics.get('mood_bias', 0))
-        
-        obs = next_obs
-    
-    # Record success
-    metrics.success = terminated and info['door_open']
-    
-    # Average metrics
-    if losses:
-        metrics.mean_loss = np.mean(losses)
-        metrics.mean_td_error = np.mean(td_errors)
-        metrics.mean_q_value = np.mean(q_values)
-    
-    if mood_values:
-        metrics.mean_mood_value = np.mean(mood_values)
-        metrics.mean_mood_action = np.mean(mood_actions)
-        metrics.mean_overall_mood = np.mean(overall_moods)
-        metrics.mean_mood_bias = np.mean(mood_biases)
-    
-    # Get final epsilon
-    metrics.epsilon = agent.epsilon
-    
-    # Get effective epsilon and exploration boosts for emotional agent
-    if hasattr(agent, 'mood_system'):
-        metrics.effective_epsilon = agent.mood_system.get_exploration_boost(
-            agent.epsilon,
-            agent.exploration_boost_scale
-        )
-        metrics.exploration_boosts = agent.exploration_boosts
-        
-        # Reset episode-level mood (partial reset)
-        agent.reset_episode()
-    else:
-        metrics.effective_epsilon = agent.epsilon
-    
-    return metrics
 
 
 def train(
@@ -229,7 +178,10 @@ def train(
     device: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
     verbose: bool = True,
-    progress_every: int = 100
+    progress_every: int = 100,
+    checkpoint_interval: int = 50,
+    image_size: int = 64,
+    network_class=None,
 ) -> MetricsLogger:
     """
     Train an agent on the maze.
@@ -245,6 +197,9 @@ def train(
         config: Additional configuration
         verbose: Whether to print progress
         progress_every: Print progress every N episodes
+        checkpoint_interval: Save checkpoints every N episodes (1-based)
+        image_size: Size of square observation image (e.g. 64 or 7)
+        network_class: Network class override (default: auto-select based on size)
     
     Returns:
         MetricsLogger with all episode data
@@ -270,11 +225,18 @@ def train(
         print(f"  Run ID: {run_id}")
     
     # Create environment
-    env = VisualMazeEnv(maze_name=maze_name, image_size=64)
-    
+    env = VisualMazeEnv(maze_name=maze_name, image_size=image_size)
+
+    decay_steps = resolve_epsilon_decay_steps(n_episodes, env.max_steps, config)
+    config["epsilon_decay_steps"] = decay_steps
+
     if verbose:
         print(f"  Observation shape: {env.observation_space.shape}")
         print(f"  Action space: {env.action_space.n}")
+        print(
+            f"  Epsilon decay: 1.0 -> 0.05 over {decay_steps:,} env steps "
+            f"({n_episodes} episodes x {env.max_steps} max steps/episode)"
+        )
     
     # Create agent
     agent = create_agent(
@@ -283,7 +245,8 @@ def train(
         n_actions=env.action_space.n,
         config=config,
         device=device,
-        seed=seed
+        seed=seed,
+        network_class=network_class,
     )
     
     if verbose:
@@ -300,9 +263,14 @@ def train(
         maze_name=maze_name,
         run_id=run_id
     )
+
+    checkpoint_dir = run_log_dir / "checkpoints"
+    checkpoint_episodes = get_checkpoint_episodes(n_episodes, checkpoint_interval)
     
     if verbose:
         print(f"  Logging to: {run_log_dir}")
+        print(f"  Checkpoints: {checkpoint_dir}")
+        print(f"  Checkpoint episodes: {sorted(checkpoint_episodes)}")
         print(f"\nStarting training...")
     
     # Training loop
@@ -314,6 +282,11 @@ def train(
         
         # Log
         logger.log_episode(metrics)
+
+        episode_num = episode + 1
+        if should_save_checkpoint(episode_num, checkpoint_episodes):
+            checkpoint_path = checkpoint_dir / f"agent_episode_{episode_num}.pt"
+            agent.save_checkpoint(str(checkpoint_path), episode=episode_num)
         
         # Update progress bar
         if episode >= 100:
@@ -352,6 +325,7 @@ def train(
             print(f"  Total exploration boosts: {summary.get('total_exploration_boosts', 0)}")
         
         print(f"\n  Agent saved to: {agent_path}")
+        print(f"  Checkpoints saved to: {checkpoint_dir}")
         print(f"  Logs saved to: {run_log_dir}")
     
     return logger
@@ -368,6 +342,11 @@ def main():
     # Environment
     parser.add_argument('--maze', type=str, default='minimal',
                        help='Name of maze to use')
+    parser.add_argument('--image_size', type=int, default=64,
+                       help='Observation image size (64 for standard, 7 for 1px/cell)')
+    parser.add_argument('--network_size', type=str, default='standard',
+                       choices=['standard', 'small'],
+                       help='Network architecture size')
     
     # Training
     parser.add_argument('--episodes', type=int, default=1000,
@@ -384,6 +363,8 @@ def main():
                        help='Run ID')
     parser.add_argument('--progress_every', type=int, default=100,
                        help='Print progress every N episodes')
+    parser.add_argument('--checkpoint_interval', type=int, default=50,
+                       help='Save checkpoints every N episodes (1-based)')
     
     # DQN hyperparameters
     parser.add_argument('--lr', type=float, default=1e-4,
@@ -394,8 +375,10 @@ def main():
                        help='Replay buffer size')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size')
-    parser.add_argument('--epsilon_decay', type=int, default=50000,
-                       help='Epsilon decay steps')
+    parser.add_argument(
+        '--epsilon_decay', type=int, default=None,
+        help='Epsilon decay env steps (default: episodes * maze max_steps)',
+    )
     
     # Emotional parameters (SIMPLIFIED - only 2 now)
     parser.add_argument('--lambda_mood', type=float, default=0.95,
@@ -411,11 +394,17 @@ def main():
         'gamma': args.gamma,
         'buffer_size': args.buffer_size,
         'batch_size': args.batch_size,
-        'epsilon_decay_steps': args.epsilon_decay,
         # Emotional params
         'lambda_mood': args.lambda_mood,
         'beta': args.beta,
     }
+    if args.epsilon_decay is not None:
+        config['epsilon_decay_steps'] = args.epsilon_decay
+    
+    # Resolve network class
+    network_class = None
+    if args.network_size == 'small':
+        network_class = SmallDQNNetwork
     
     # Train
     train(
@@ -428,7 +417,10 @@ def main():
         device=args.device,
         config=config,
         verbose=True,
-        progress_every=args.progress_every
+        progress_every=args.progress_every,
+        checkpoint_interval=args.checkpoint_interval,
+        image_size=args.image_size,
+        network_class=network_class,
     )
 
 
