@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 from tqdm import tqdm
 
 from train import train, get_checkpoint_episodes
+from agents import SmallDQNNetwork
 from utils import ExperimentLogger
 
 
@@ -122,6 +123,8 @@ def run_comparison(
     checkpoint_interval: int = 50,
     analyze_checkpoints: bool = False,
     analysis_episodes: Optional[List[int]] = None,
+    image_size: int = 64,
+    network_class=None,
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -154,6 +157,8 @@ def run_comparison(
         print(f"  Checkpoint interval: {checkpoint_interval}")
         print(f"  Planned checkpoint episodes: {planned_episodes}")
         print(f"  Total training runs: {n_runs * 2}")
+        print(f"  Image size: {image_size}")
+        print(f"  Network: {network_class.__name__ if network_class else 'DQNNetwork'}")
         print(f"  Device: {device or 'auto'}")
         print(f"  Output: {experiment_dir}")
         print(f"  Config: {config}")
@@ -198,6 +203,8 @@ def run_comparison(
                 verbose=True,
                 progress_every=max(1, n_episodes // 5),
                 checkpoint_interval=checkpoint_interval,
+                image_size=image_size,
+                network_class=network_class,
             )
 
             run_metrics = logger.get_run_metrics()
@@ -269,6 +276,8 @@ def quick_test(
     device: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
     checkpoint_interval: int = 50,
+    image_size: int = 64,
+    network_class=None,
 ) -> None:
     """Quick test to verify both agents work and save checkpoints."""
     print("\n" + "=" * 70)
@@ -287,6 +296,8 @@ def quick_test(
 
     print(f"  lambda_mood: {test_config['lambda_mood']}")
     print(f"  beta: {test_config['beta']}")
+    print(f"  image_size: {image_size}")
+    print(f"  network: {network_class.__name__ if network_class else 'DQNNetwork'}")
     print(f"  checkpoint_interval: {checkpoint_interval}")
     print("=" * 70)
 
@@ -306,6 +317,8 @@ def quick_test(
                 verbose=True,
                 progress_every=n_episodes + 1,
                 checkpoint_interval=checkpoint_interval,
+                image_size=image_size,
+                network_class=network_class,
             )
 
             checkpoint_dir = get_run_checkpoint_dir(Path(logger.log_dir))
@@ -335,6 +348,11 @@ def main():
 
     parser.add_argument("--maze", type=str, default="minimal",
                         help="Name of maze to use")
+    parser.add_argument("--image_size", type=int, default=64,
+                        help="Observation image size (64 for standard, 7 for 1px/cell)")
+    parser.add_argument("--network_size", type=str, default="standard",
+                        choices=["standard", "small"],
+                        help="Network architecture size")
     parser.add_argument("--runs", type=int, default=3,
                         help="Number of runs per agent type")
     parser.add_argument("--episodes", type=int, default=1000,
@@ -394,6 +412,10 @@ def main():
     if args.analysis_episodes:
         analysis_episodes = [int(e) for e in args.analysis_episodes.split(",")]
 
+    network_class = None
+    if args.network_size == "small":
+        network_class = SmallDQNNetwork
+
     if args.quick_test:
         quick_test(
             maze_name=args.maze,
@@ -402,6 +424,8 @@ def main():
             device=args.device,
             config=config,
             checkpoint_interval=args.checkpoint_interval,
+            image_size=args.image_size,
+            network_class=network_class,
         )
     else:
         run_comparison(
@@ -416,6 +440,8 @@ def main():
             checkpoint_interval=args.checkpoint_interval,
             analyze_checkpoints=args.analyze_checkpoints,
             analysis_episodes=analysis_episodes,
+            image_size=args.image_size,
+            network_class=network_class,
         )
 
 
