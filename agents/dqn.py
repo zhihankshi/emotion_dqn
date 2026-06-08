@@ -24,7 +24,7 @@ class DQNNetwork(nn.Module):
         Initialize DQN network.
         
         Args:
-            input_shape: Shape of input observations (H, W, C)
+            input_shape: Shape of input observations (C, H, W)
             n_actions: Number of possible actions
         """
         super().__init__()
@@ -32,9 +32,7 @@ class DQNNetwork(nn.Module):
         self.input_shape = input_shape
         self.n_actions = n_actions
         
-        # Input is (H, W, C), but PyTorch expects (C, H, W)
-        # We'll transpose in forward()
-        h, w, c = input_shape
+        c, h, w = input_shape
         
         # Convolutional layers (scaled down from Nature DQN)
         self.conv = nn.Sequential(
@@ -68,16 +66,13 @@ class DQNNetwork(nn.Module):
         Forward pass.
         
         Args:
-            x: Input tensor of shape (batch, H, W, C) with values in [0, 255]
+            x: Input tensor of shape (batch, C, H, W) with values in [0, 255]
         
         Returns:
             Q-values for each action, shape (batch, n_actions)
         """
         # Normalize to [0, 1]
         x = x.float() / 255.0
-        
-        # Transpose from (batch, H, W, C) to (batch, C, H, W)
-        x = x.permute(0, 3, 1, 2)
         
         # Conv layers
         x = self.conv(x)
@@ -116,7 +111,7 @@ class DQNAgent:
         Initialize DQN agent.
         
         Args:
-            observation_shape: Shape of observations (H, W, C)
+            observation_shape: Shape of observations (C, H, W)
             n_actions: Number of actions
             learning_rate: Learning rate for optimizer
             gamma: Discount factor
@@ -350,7 +345,7 @@ if __name__ == "__main__":
     
     # Create agent
     agent = DQNAgent(
-        observation_shape=(64, 64, 3),
+        observation_shape=(3, 64, 64),
         n_actions=4,
         buffer_size=1000,
         batch_size=32,
@@ -361,17 +356,17 @@ if __name__ == "__main__":
     print(f"  Network parameters: {sum(p.numel() for p in agent.policy_net.parameters()):,}")
     
     # Test action selection
-    dummy_state = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+    dummy_state = np.random.randint(0, 255, (3, 64, 64), dtype=np.uint8)
     action = agent.select_action(dummy_state)
     print(f"  Selected action: {action}")
     
     # Fill buffer with dummy transitions
     print("  Filling replay buffer...")
     for i in range(100):
-        state = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        state = np.random.randint(0, 255, (3, 64, 64), dtype=np.uint8)
         action = np.random.randint(4)
         reward = np.random.randn()
-        next_state = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        next_state = np.random.randint(0, 255, (3, 64, 64), dtype=np.uint8)
         done = i % 20 == 0
         
         agent.store_transition(state, action, reward, next_state, done)

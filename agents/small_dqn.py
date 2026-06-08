@@ -23,7 +23,7 @@ class SmallDQNNetwork(nn.Module):
 
         self.input_shape = input_shape
         self.n_actions = n_actions
-        h, w, c = input_shape
+        c, h, w = input_shape
 
         self.conv = nn.Sequential(
             nn.Conv2d(c, 16, kernel_size=3, stride=1, padding=1),
@@ -48,7 +48,6 @@ class SmallDQNNetwork(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float() / 255.0
-        x = x.permute(0, 3, 1, 2)
         x = self.conv(x)
         x = x.reshape(x.size(0), -1)
         x = self.fc(x)

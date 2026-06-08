@@ -112,7 +112,7 @@ class VisualMazeEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=0,
             high=255,
-            shape=(image_size, image_size, 3),
+            shape=(3, image_size, image_size),
             dtype=np.uint8
         )
     
@@ -258,14 +258,16 @@ class VisualMazeEnv(gym.Env):
         return True
 
     def _get_observation(self) -> np.ndarray:
-        """Render current state to pixel observation."""
-        return self.renderer.render(
+        """Render current state to pixel observation (C, H, W)."""
+        observation = self.renderer.render(
             agent_pos=self.agent_pos,
             has_key=self.has_key,
             door_open=self.door_open,
             has_shield=self.has_shield,
             shield_consumed=self.shield_consumed
         )
+        observation = np.transpose(observation, (2, 0, 1))
+        return observation
     
     def _get_info(self) -> Dict[str, Any]:
         """Get current state info for debugging and metrics."""
