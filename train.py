@@ -37,22 +37,6 @@ def should_save_checkpoint(
     return episode_num in checkpoint_episodes
 
 
-def resolve_epsilon_decay_steps(
-    n_episodes: int,
-    max_steps_per_episode: int,
-    config: Dict[str, Any],
-) -> int:
-    """
-    Steps over which epsilon linearly decays from start to end.
-
-    Default: full training run = n_episodes * max_steps_per_episode.
-    Override by setting config['epsilon_decay_steps'] or --epsilon_decay.
-    """
-    if config.get("epsilon_decay_steps") is not None:
-        return int(config["epsilon_decay_steps"])
-    return n_episodes * max_steps_per_episode
-
-
 def create_agent(
     agent_type: str,
     observation_shape: tuple,
@@ -71,7 +55,6 @@ def create_agent(
         'gamma': config.get('gamma', 0.99),
         'epsilon_start': config.get('epsilon_start', 1.0),
         'epsilon_end': config.get('epsilon_end', 0.05),
-        'epsilon_decay_steps': config.get('epsilon_decay_steps', 50000),
         'buffer_size': config.get('buffer_size', 50000),
         'batch_size': config.get('batch_size', 32),
         'target_update_freq': config.get('target_update_freq', 1000),
@@ -227,15 +210,15 @@ def train(
     # Create environment
     env = VisualMazeEnv(maze_name=maze_name, image_size=image_size)
 
-    decay_steps = resolve_epsilon_decay_steps(n_episodes, env.max_steps, config)
-    config["epsilon_decay_steps"] = decay_steps
+    epsilon_start = config.get('epsilon_start', 1.0)
+    epsilon_end = config.get('epsilon_end', 0.05)
 
     if verbose:
         print(f"  Observation shape: {env.observation_space.shape}")
         print(f"  Action space: {env.action_space.n}")
         print(
-            f"  Epsilon decay: 1.0 -> 0.05 over {decay_steps:,} env steps "
-            f"({n_episodes} episodes x {env.max_steps} max steps/episode)"
+            f"  Epsilon decay: {epsilon_start} -> {epsilon_end} "
+            f"linearly over {n_episodes} episodes"
         )
     
     # Create agent
@@ -277,6 +260,8 @@ def train(
     pbar = tqdm(range(n_episodes), disable=not verbose)
     
     for episode in pbar:
+        agent.update_epsilon_for_episode(episode, n_episodes)
+
         # Train one episode
         metrics = train_episode(env, agent, episode, training=True)
         
@@ -375,10 +360,6 @@ def main():
                        help='Replay buffer size')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size')
-    parser.add_argument(
-        '--epsilon_decay', type=int, default=None,
-        help='Epsilon decay env steps (default: episodes * maze max_steps)',
-    )
     
     # Emotional parameters (SIMPLIFIED - only 2 now)
     parser.add_argument('--lambda_mood', type=float, default=0.95,
@@ -398,8 +379,6 @@ def main():
         'lambda_mood': args.lambda_mood,
         'beta': args.beta,
     }
-    if args.epsilon_decay is not None:
-        config['epsilon_decay_steps'] = args.epsilon_decay
     
     # Resolve network class
     network_class = None

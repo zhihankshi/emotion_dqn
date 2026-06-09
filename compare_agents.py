@@ -154,6 +154,7 @@ def run_comparison(
         print(f"  Maze: {maze_name}")
         print(f"  Runs per agent: {n_runs}")
         print(f"  Episodes per run: {n_episodes}")
+        print(f"  Epsilon decay: 1.0 -> 0.05 over {n_episodes} episodes")
         print(f"  Checkpoint interval: {checkpoint_interval}")
         print(f"  Planned checkpoint episodes: {planned_episodes}")
         print(f"  Total training runs: {n_runs * 2}")
@@ -387,10 +388,6 @@ def main():
                         help="Replay buffer size")
     parser.add_argument("--batch_size", type=int, default=32,
                         help="Batch size")
-    parser.add_argument(
-        "--epsilon_decay", type=int, default=None,
-        help="Epsilon decay env steps (default: episodes * maze max_steps)",
-    )
 
     parser.add_argument("--lambda_mood", type=float, default=0.8,
                         help="Mood persistence (0-1, higher = slower change)")
@@ -405,8 +402,6 @@ def main():
         "lambda_mood": args.lambda_mood,
         "eta": args.eta,
     }
-    if args.epsilon_decay is not None:
-        config["epsilon_decay_steps"] = args.epsilon_decay
 
     analysis_episodes = None
     if args.analysis_episodes:

@@ -99,7 +99,6 @@ class DQNAgent:
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.05,
-        epsilon_decay_steps: int = 50000,
         buffer_size: int = 50000,
         batch_size: int = 32,
         target_update_freq: int = 1000,
@@ -116,8 +115,7 @@ class DQNAgent:
             learning_rate: Learning rate for optimizer
             gamma: Discount factor
             epsilon_start: Initial exploration rate
-            epsilon_end: Final exploration rate
-            epsilon_decay_steps: Steps to decay epsilon
+            epsilon_end: Final exploration rate (reached at last episode)
             buffer_size: Replay buffer capacity
             batch_size: Training batch size
             target_update_freq: Steps between target network updates
@@ -135,7 +133,6 @@ class DQNAgent:
         self.epsilon = epsilon_start
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
-        self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_decay_steps
         
         # Device
         if device is None:
@@ -165,6 +162,15 @@ class DQNAgent:
         # Counters
         self.steps = 0
         self.updates = 0
+    
+    def update_epsilon_for_episode(self, episode: int, n_episodes: int) -> None:
+        """Linear epsilon decay over training episodes."""
+        if n_episodes <= 1:
+            self.epsilon = self.epsilon_end
+            return
+        progress = episode / (n_episodes - 1)
+        self.epsilon = self.epsilon_start - (self.epsilon_start - self.epsilon_end) * progress
+        self.epsilon = max(self.epsilon_end, self.epsilon)
     
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """
@@ -262,7 +268,7 @@ class DQNAgent:
         done: bool
     ) -> Optional[Dict[str, float]]:
         """
-        Complete step: store transition, update, decay epsilon.
+        Complete step: store transition and update network.
         
         Returns:
             Update metrics or None
@@ -274,9 +280,6 @@ class DQNAgent:
         
         # Update
         metrics = self.update()
-        
-        # Decay epsilon
-        self.epsilon = max(self.epsilon_end, self.epsilon - self.epsilon_decay)
         
         if metrics:
             metrics['epsilon'] = self.epsilon

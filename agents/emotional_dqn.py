@@ -65,7 +65,6 @@ class EmotionalDQNAgent:
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.05,
-        epsilon_decay_steps: int = 50000,
         buffer_size: int = 50000,
         batch_size: int = 32,
         target_update_freq: int = 1000,
@@ -98,7 +97,6 @@ class EmotionalDQNAgent:
         self.epsilon = epsilon_start
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
-        self.epsilon_decay = (epsilon_start - epsilon_end) / epsilon_decay_steps
         
         # Device
         if device is None:
@@ -131,6 +129,15 @@ class EmotionalDQNAgent:
         # Counters
         self.steps = 0
         self.updates = 0
+    
+    def update_epsilon_for_episode(self, episode: int, n_episodes: int) -> None:
+        """Linear epsilon decay over training episodes."""
+        if n_episodes <= 1:
+            self.epsilon = self.epsilon_end
+            return
+        progress = episode / (n_episodes - 1)
+        self.epsilon = self.epsilon_start - (self.epsilon_start - self.epsilon_end) * progress
+        self.epsilon = max(self.epsilon_end, self.epsilon)
     
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """Select action using epsilon-greedy."""
@@ -245,11 +252,10 @@ class EmotionalDQNAgent:
         next_state: np.ndarray,
         done: bool
     ) -> Optional[Dict[str, float]]:
-        """Complete step: store, update, decay epsilon."""
+        """Complete step: store transition and update network."""
         self.steps += 1
         self.store_transition(state, action, reward, next_state, done)
         metrics = self.update()
-        self.epsilon = max(self.epsilon_end, self.epsilon - self.epsilon_decay)
         
         if metrics:
             metrics['epsilon'] = self.epsilon
