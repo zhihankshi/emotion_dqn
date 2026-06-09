@@ -1,5 +1,5 @@
 name: "shield_trap"
-description: "Agent must collect shield before crossing trap to minimize penalty"
+description: "Simple L-shaped maze: agent must collect shield before crossing trap"
 
 size: [7, 9]
 
@@ -8,7 +8,7 @@ goal_position: [1, 7]
 door_position: null
 key_required: false
 
-shield_position: [5, 4]
+shield_position: [5, 1]
 trap_position: [1, 5]
 
 walls:
@@ -25,7 +25,7 @@ walls:
   # Row 1 (left/right border)
   - [1, 0]
   - [1, 8]
-  # Row 2 (border + interior wall)
+  # Row 2
   - [2, 0]
   - [2, 2]
   - [2, 3]
@@ -37,13 +37,28 @@ walls:
   # Row 3
   - [3, 0]
   - [3, 2]
+  - [3, 3]
+  - [3, 4]
+  - [3, 5]
+  - [3, 6]
+  - [3, 7]
   - [3, 8]
   # Row 4
   - [4, 0]
   - [4, 2]
+  - [4, 3]
+  - [4, 4]
+  - [4, 5]
+  - [4, 6]
+  - [4, 7]
   - [4, 8]
   # Row 5
   - [5, 0]
+  - [5, 2]
+  - [5, 3]
+  - [5, 4]
+  - [5, 5]
+  - [5, 6]
   - [5, 7]
   - [5, 8]
   # Row 6 (bottom border)
