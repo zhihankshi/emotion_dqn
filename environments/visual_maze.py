@@ -223,6 +223,7 @@ class VisualMazeEnv(gym.Env):
                 and not self.shield_consumed):
             self.has_shield = True
             self.shield_pickup_step = self.steps
+            reward += self.rewards.get('shield_pickup', 0)
         
         # Check key pickup
         if (self.has_key_mechanic

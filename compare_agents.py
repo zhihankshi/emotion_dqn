@@ -79,6 +79,8 @@ def analyze_run_checkpoints(
     maze_name: str,
     analysis_episodes: Optional[List[int]] = None,
     output_dir: Optional[Path] = None,
+    network_size: str = 'standard',
+    image_size: int = 64,
 ) -> None:
     """Run policy evolution analysis on checkpoints from one training run."""
     from analyze_policy_evolution import analyze_checkpoints, plot_policy_evolution
@@ -95,6 +97,8 @@ def analyze_run_checkpoints(
         maze_name=maze_name,
         episodes_to_analyze=analysis_episodes,
         agent_type=agent_type,
+        network_size=network_size,
+        image_size=image_size,
     )
 
     if results is None or results.empty:
@@ -125,6 +129,7 @@ def run_comparison(
     analysis_episodes: Optional[List[int]] = None,
     image_size: int = 64,
     network_class=None,
+    network_size: str = 'standard',
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -259,6 +264,8 @@ def run_comparison(
                 maze_name=maze_name,
                 analysis_episodes=analysis_episodes,
                 output_dir=analysis_dir,
+                network_size=network_size,
+                image_size=image_size,
             )
 
     if verbose:
@@ -437,6 +444,7 @@ def main():
             analysis_episodes=analysis_episodes,
             image_size=args.image_size,
             network_class=network_class,
+            network_size=args.network_size,
         )
 
 

@@ -60,12 +60,13 @@ walls:
 traps: []
 
 rewards:
-  step: -1.0
-  trap_no_shield: -100.0
-  trap_with_shield: -10.0
-  goal: 0.0
+  step: -0.1
+  trap_no_shield: -30.0
+  trap_with_shield: -5.0
+  goal: 20.0
+  shield_pickup: 5.0
   wall_bump: -0.1
-  timeout: -200.0
+  timeout: -50.0
 
 max_steps: 100
 
