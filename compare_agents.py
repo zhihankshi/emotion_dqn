@@ -132,6 +132,7 @@ def run_comparison(
     network_size: str = 'standard',
     baseline_checkpoint: Optional[str] = None,
     emotional_checkpoint: Optional[str] = None,
+    reset_epsilon: Optional[float] = None,
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -171,6 +172,8 @@ def run_comparison(
             print(f"  Baseline pretrained: {baseline_checkpoint}")
         if emotional_checkpoint:
             print(f"  Emotional pretrained: {emotional_checkpoint}")
+        if reset_epsilon is not None:
+            print(f"  Reset epsilon: {reset_epsilon}")
         print(f"  Device: {device or 'auto'}")
         print(f"  Output: {experiment_dir}")
         print(f"  Config: {config}")
@@ -224,6 +227,7 @@ def run_comparison(
                 image_size=image_size,
                 network_class=network_class,
                 pretrained_checkpoint=pretrained_checkpoint,
+                reset_epsilon=reset_epsilon,
             )
 
             run_metrics = logger.get_run_metrics()
@@ -416,6 +420,8 @@ def main():
                         help="Path to pretrained baseline checkpoint (.pt)")
     parser.add_argument("--emotional_checkpoint", type=str, default=None,
                         help="Path to pretrained emotional checkpoint (.pt)")
+    parser.add_argument("--reset_epsilon", type=float, default=None,
+                        help="Reset epsilon to this value when loading checkpoint")
 
     args = parser.parse_args()
 
@@ -465,6 +471,7 @@ def main():
             network_size=args.network_size,
             baseline_checkpoint=args.baseline_checkpoint,
             emotional_checkpoint=args.emotional_checkpoint,
+            reset_epsilon=args.reset_epsilon,
         )
 
 

@@ -166,6 +166,7 @@ def train(
     image_size: int = 64,
     network_class=None,
     pretrained_checkpoint: Optional[str] = None,
+    reset_epsilon: Optional[float] = None,
 ) -> MetricsLogger:
     """
     Train an agent on the maze.
@@ -185,6 +186,7 @@ def train(
         image_size: Size of square observation image (e.g. 64 or 7)
         network_class: Network class override (default: auto-select based on size)
         pretrained_checkpoint: Optional path to load policy weights before training
+        reset_epsilon: If set, reset epsilon to this value after loading checkpoint
     
     Returns:
         MetricsLogger with all episode data
@@ -239,6 +241,12 @@ def train(
         if verbose:
             print(f"  Loaded pretrained checkpoint: {pretrained_checkpoint}")
             print(f"    Saved at episode: {saved_episode}")
+
+    if reset_epsilon is not None:
+        agent.epsilon = reset_epsilon
+        agent.epsilon_start = reset_epsilon
+        if verbose:
+            print(f"  Reset epsilon to {reset_epsilon} for transfer learning")
     
     if verbose:
         n_params = sum(p.numel() for p in agent.policy_net.parameters())
