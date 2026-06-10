@@ -165,6 +165,7 @@ def train(
     checkpoint_interval: int = 50,
     image_size: int = 64,
     network_class=None,
+    pretrained_checkpoint: Optional[str] = None,
 ) -> MetricsLogger:
     """
     Train an agent on the maze.
@@ -183,6 +184,7 @@ def train(
         checkpoint_interval: Save checkpoints every N episodes (1-based)
         image_size: Size of square observation image (e.g. 64 or 7)
         network_class: Network class override (default: auto-select based on size)
+        pretrained_checkpoint: Optional path to load policy weights before training
     
     Returns:
         MetricsLogger with all episode data
@@ -231,6 +233,12 @@ def train(
         seed=seed,
         network_class=network_class,
     )
+
+    if pretrained_checkpoint:
+        saved_episode = agent.load_checkpoint(pretrained_checkpoint)
+        if verbose:
+            print(f"  Loaded pretrained checkpoint: {pretrained_checkpoint}")
+            print(f"    Saved at episode: {saved_episode}")
     
     if verbose:
         n_params = sum(p.numel() for p in agent.policy_net.parameters())

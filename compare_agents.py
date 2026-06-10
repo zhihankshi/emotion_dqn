@@ -130,6 +130,8 @@ def run_comparison(
     image_size: int = 64,
     network_class=None,
     network_size: str = 'standard',
+    baseline_checkpoint: Optional[str] = None,
+    emotional_checkpoint: Optional[str] = None,
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -165,6 +167,10 @@ def run_comparison(
         print(f"  Total training runs: {n_runs * 2}")
         print(f"  Image size: {image_size}")
         print(f"  Network: {network_class.__name__ if network_class else 'DQNNetwork'}")
+        if baseline_checkpoint:
+            print(f"  Baseline pretrained: {baseline_checkpoint}")
+        if emotional_checkpoint:
+            print(f"  Emotional pretrained: {emotional_checkpoint}")
         print(f"  Device: {device or 'auto'}")
         print(f"  Output: {experiment_dir}")
         print(f"  Config: {config}")
@@ -197,6 +203,12 @@ def run_comparison(
             if verbose:
                 print(f"\n--- {agent_type} Run {run_id + 1}/{n_runs} (seed={seed}) ---")
 
+            pretrained_checkpoint = None
+            if agent_type == "baseline" and baseline_checkpoint:
+                pretrained_checkpoint = baseline_checkpoint
+            elif agent_type == "emotional" and emotional_checkpoint:
+                pretrained_checkpoint = emotional_checkpoint
+
             logger = train(
                 maze_name=maze_name,
                 agent_type=agent_type,
@@ -211,6 +223,7 @@ def run_comparison(
                 checkpoint_interval=checkpoint_interval,
                 image_size=image_size,
                 network_class=network_class,
+                pretrained_checkpoint=pretrained_checkpoint,
             )
 
             run_metrics = logger.get_run_metrics()
@@ -399,6 +412,11 @@ def main():
     parser.add_argument("--lambda_mood", type=float, default=0.8,
                         help="Mood persistence (0-1, higher = slower change)")
 
+    parser.add_argument("--baseline_checkpoint", type=str, default=None,
+                        help="Path to pretrained baseline checkpoint (.pt)")
+    parser.add_argument("--emotional_checkpoint", type=str, default=None,
+                        help="Path to pretrained emotional checkpoint (.pt)")
+
     args = parser.parse_args()
 
     config = {
@@ -445,6 +463,8 @@ def main():
             image_size=args.image_size,
             network_class=network_class,
             network_size=args.network_size,
+            baseline_checkpoint=args.baseline_checkpoint,
+            emotional_checkpoint=args.emotional_checkpoint,
         )
 
 
