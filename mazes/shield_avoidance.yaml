@@ -1,0 +1,93 @@
+name: "shield_avoidance"
+description: "Mirrored L-shaped maze with negative-only rewards for avoidance learning"
+
+size: [7, 9]
+
+agent_start: [1, 1]
+goal_position: [1, 7]
+door_position: null
+key_required: false
+
+shield_position: [5, 1]
+trap_position: [1, 5]
+
+walls:
+  # Row 0 (top border)
+  - [0, 0]
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+  - [0, 5]
+  - [0, 6]
+  - [0, 7]
+  - [0, 8]
+  # Row 1 (left/right border)
+  - [1, 0]
+  - [1, 8]
+  # Row 2
+  - [2, 0]
+  - [2, 2]
+  - [2, 3]
+  - [2, 4]
+  - [2, 5]
+  - [2, 6]
+  - [2, 7]
+  - [2, 8]
+  # Row 3
+  - [3, 0]
+  - [3, 2]
+  - [3, 3]
+  - [3, 4]
+  - [3, 5]
+  - [3, 6]
+  - [3, 7]
+  - [3, 8]
+  # Row 4
+  - [4, 0]
+  - [4, 2]
+  - [4, 3]
+  - [4, 4]
+  - [4, 5]
+  - [4, 6]
+  - [4, 7]
+  - [4, 8]
+  # Row 5
+  - [5, 0]
+  - [5, 2]
+  - [5, 3]
+  - [5, 4]
+  - [5, 5]
+  - [5, 6]
+  - [5, 7]
+  - [5, 8]
+  # Row 6 (bottom border)
+  - [6, 0]
+  - [6, 1]
+  - [6, 2]
+  - [6, 3]
+  - [6, 4]
+  - [6, 5]
+  - [6, 6]
+  - [6, 7]
+  - [6, 8]
+
+traps: []
+
+rewards:
+  step: 0
+  trap_no_shield: -30.0
+  trap_with_shield: -5.0
+  goal: 0
+  shield_pickup: 0
+  wall_bump: 0
+
+max_steps: 100
+
+colors:
+  agent: [0, 0, 255]
+  shield: [0, 255, 255]
+  goal: [0, 255, 0]
+  wall: [64, 64, 64]
+  trap: [255, 0, 0]
+  floor: [240, 240, 240]

@@ -1,0 +1,38 @@
+{
+  "run_info": {
+    "agent_type": "emotional",
+    "maze_name": "shield_avoidance",
+    "run_id": 0,
+    "start_time": "2026-06-16T15:32:45.779046",
+    "end_time": "2026-06-16T15:34:37.289122"
+  },
+  "summary": {
+    "total_episodes": 50,
+    "success_rate": 0.5,
+    "avg_steps": 74.8,
+    "avg_reward": -51.9,
+    "first_success": 0,
+    "total_successes": 25,
+    "avg_door_attempts_without_key": 0.0,
+    "avg_mood": -0.03193933130167004,
+    "total_exploration_boosts": 0,
+    "avg_mood_bias": 0.0
+  },
+  "run_metrics": {
+    "run_id": 0,
+    "agent_type": "emotional",
+    "maze_name": "shield_avoidance",
+    "total_episodes": 50,
+    "first_success_episode": 0,
+    "total_successes": 25,
+    "final_success_rate": 0.5,
+    "final_avg_steps": 74.8,
+    "final_avg_reward": -51.9,
+    "episodes_to_50_percent_success": -1,
+    "episodes_to_90_percent_success": -1,
+    "avg_door_attempts_before_first_key": 0.0,
+    "avg_key_found_step": 0.0,
+    "avg_exploration_boosts_per_episode": 0.0,
+    "total_mood_bias_applied": 0.0
+  }
+}

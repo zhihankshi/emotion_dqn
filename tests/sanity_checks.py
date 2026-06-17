@@ -383,6 +383,124 @@ def test_reproducibility():
     return True
 
 
+def test_layout_parity():
+    """Mirrored mazes share the same spatial layout."""
+    print("\n" + "="*50)
+    print("TEST: Mirrored Maze Layout Parity")
+    print("="*50)
+
+    key_config = load_maze("key_approach")
+    shield_config = load_maze("shield_avoidance")
+
+    shared_fields = ["size", "walls", "agent_start", "goal_position"]
+    for field in shared_fields:
+        assert key_config[field] == shield_config[field], (
+            f"Layout mismatch on '{field}': "
+            f"key={key_config[field]}, shield={shield_config[field]}"
+        )
+
+    print(f"  Shared size: {key_config['size']}")
+    print(f"  Shared wall count: {len(key_config['walls'])}")
+    print("✓ Mirrored maze layouts match!")
+    return True
+
+
+def test_key_approach_positive_only():
+    """Key approach maze provides only non-negative rewards."""
+    print("\n" + "="*50)
+    print("TEST: Key Approach Positive-Only Rewards")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="key_approach")
+    env.reset()
+
+    # Optimal path: down to key, up to start, right through door, right to goal
+    optimal_actions = [1] * 4 + [0] * 4 + [3] * 6
+    rewards = []
+    terminated = False
+
+    for action in optimal_actions:
+        _, reward, terminated, truncated, info = env.step(action)
+        rewards.append(reward)
+        assert reward >= 0, f"Negative reward on optimal path: {reward}"
+        if terminated or truncated:
+            break
+
+    assert terminated, "Optimal path should reach goal"
+    assert any(r > 0 for r in rewards), "Expected at least one positive reward"
+    assert sum(rewards) == 13.0, f"Optimal total should be 13.0, got {sum(rewards)}"
+
+    # Wall bump and door-block should be zero, not negative
+    env.reset()
+    _, reward, _, _, _ = env.step(2)  # left into wall at [1,0]
+    assert reward == 0, f"Wall bump should be 0, got {reward}"
+
+    env.reset()
+    for _ in range(4):
+        env.step(3)  # move to door without key
+    _, reward, term, _, info = env.step(3)
+    assert reward == 0, f"Door without key should be 0, got {reward}"
+    assert not term, "Should not complete episode without key"
+    assert not info["door_open"], "Door should remain closed without key"
+
+    print(f"  Optimal path rewards: {rewards}")
+    print(f"  Optimal total: {sum(rewards)}")
+    print("✓ Key approach rewards are positive-only!")
+    return True
+
+
+def test_shield_avoidance_negative_only():
+    """Shield avoidance maze provides only non-positive rewards."""
+    print("\n" + "="*50)
+    print("TEST: Shield Avoidance Negative-Only Rewards")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="shield_avoidance")
+    env.reset()
+
+    # Optimal path with shield: down, up, right through trap, right to goal
+    optimal_actions = [1] * 4 + [0] * 4 + [3] * 6
+    rewards = []
+    terminated = False
+    trap_reward = None
+    goal_reward = None
+
+    for action in optimal_actions:
+        _, reward, terminated, truncated, info = env.step(action)
+        rewards.append(reward)
+        assert reward <= 0, f"Positive reward on optimal path: {reward}"
+        if info.get("trap_hit_step", -1) == env.steps:
+            trap_reward = reward
+        if terminated:
+            goal_reward = reward
+        if terminated or truncated:
+            break
+
+    assert terminated, "Optimal path should reach goal"
+    assert trap_reward == -5.0, f"Trap with shield should be -5.0, got {trap_reward}"
+    assert goal_reward == 0, f"Goal should give 0 reward, got {goal_reward}"
+    assert sum(rewards) == -5.0, f"Optimal total should be -5.0, got {sum(rewards)}"
+
+    # Trap without shield should be strictly negative
+    env.reset()
+    trap_hit_reward = None
+    for _ in range(4):
+        _, reward, term, trunc, info = env.step(3)
+        if info.get("trap_hit_step", -1) == env.steps:
+            trap_hit_reward = reward
+            break
+
+    assert trap_hit_reward is not None, "Should have stepped on trap"
+    assert trap_hit_reward < 0, f"Trap without shield should be negative, got {trap_hit_reward}"
+    assert trap_hit_reward == -30.0, f"Expected -30.0 trap damage, got {trap_hit_reward}"
+
+    print(f"  Optimal path rewards: {rewards}")
+    print(f"  Optimal total: {sum(rewards)}")
+    print(f"  Trap without shield: {trap_hit_reward}")
+    print("✓ Shield avoidance rewards are negative-only!")
+    return True
+
+
 def run_all_tests():
     """Run all sanity checks."""
     print("\n" + "="*60)
@@ -401,6 +519,9 @@ def run_all_tests():
         test_full_episode_random,
         test_observation_changes,
         test_reproducibility,
+        test_layout_parity,
+        test_key_approach_positive_only,
+        test_shield_avoidance_negative_only,
     ]
     
     passed = 0

@@ -1,0 +1,39 @@
+{
+  "run_info": {
+    "agent_type": "emotional",
+    "maze_name": "key_approach",
+    "run_id": 0,
+    "start_time": "2026-06-16T15:43:21.136991",
+    "end_time": "2026-06-16T15:46:22.476911"
+  },
+  "summary": {
+    "total_episodes": 100,
+    "success_rate": 0.22,
+    "avg_steps": 93.48,
+    "avg_reward": 4.03,
+    "first_success": 6,
+    "total_successes": 22,
+    "avg_key_found_step": 23.71604938271605,
+    "avg_door_attempts_without_key": 1.47,
+    "avg_mood": -0.005594389486351543,
+    "total_exploration_boosts": 0,
+    "avg_mood_bias": 0.0
+  },
+  "run_metrics": {
+    "run_id": 0,
+    "agent_type": "emotional",
+    "maze_name": "key_approach",
+    "total_episodes": 100,
+    "first_success_episode": 6,
+    "total_successes": 22,
+    "final_success_rate": 0.22,
+    "final_avg_steps": 93.48,
+    "final_avg_reward": 4.03,
+    "episodes_to_50_percent_success": -1,
+    "episodes_to_90_percent_success": -1,
+    "avg_door_attempts_before_first_key": 2.76,
+    "avg_key_found_step": 23.71604938271605,
+    "avg_exploration_boosts_per_episode": 0.0,
+    "total_mood_bias_applied": 0.0
+  }
+}
