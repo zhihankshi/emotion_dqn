@@ -12,9 +12,15 @@ from utils.maze_benchmarks import OPTIMAL_ACTIONS, get_maze_benchmark
 def find_runs(base_dir: str = "test_runs", maze_name: str = None) -> dict:
     """Find baseline and emotional run directories."""
     base_path = Path(base_dir)
-    
+    if not base_path.exists():
+        raise FileNotFoundError(
+            f"Directory not found: {base_path}\n"
+            f"For transfer plots use: python visualize_transfer.py --latest\n"
+            f"Or: python visualize_results.py --transfer --latest"
+        )
+
     runs = {'baseline': [], 'emotional': []}
-    
+
     for run_dir in base_path.iterdir():
         if not run_dir.is_dir():
             continue
@@ -301,19 +307,76 @@ def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, win
 
 
 if __name__ == "__main__":
-    base_dir = sys.argv[1] if len(sys.argv) > 1 else "test_runs"
-    maze_name = sys.argv[2] if len(sys.argv) > 2 else None
-    window = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+    import argparse
 
-    if base_dir == "--transfer":
+    parser = argparse.ArgumentParser(
+        description="Visualize baseline vs emotional training results"
+    )
+    parser.add_argument(
+        "base_dir", nargs="?", default="test_runs",
+        help="Directory with run folders (default: test_runs)",
+    )
+    parser.add_argument(
+        "--maze", type=str, default=None,
+        help="Filter runs by maze name (e.g. shield_trap)",
+    )
+    parser.add_argument(
+        "--window", type=int, default=10,
+        help="Rolling average window (default: 10)",
+    )
+    parser.add_argument(
+        "--transfer", action="store_true",
+        help="Plot a two-phase transfer experiment instead of comparison",
+    )
+    parser.add_argument(
+        "--latest", action="store_true",
+        help="With --transfer: use latest transfer run in --runs-dir",
+    )
+    parser.add_argument(
+        "--experiment-dir", type=str, default=None,
+        help="With --transfer: path to transfer_* experiment folder",
+    )
+    parser.add_argument(
+        "--runs-dir", type=str, default="runs",
+        help="Search here for transfer experiments when using --latest",
+    )
+    parser.add_argument(
+        "--show", action="store_true",
+        help="Show plot interactively",
+    )
+    args = parser.parse_args()
+
+    if args.latest and not args.transfer:
+        parser.error(
+            "--latest is for transfer plots only. Use:\n"
+            "  python visualize_results.py --transfer --latest\n"
+            "  python visualize_transfer.py --latest"
+        )
+
+    if args.transfer:
         from utils.visualization import plot_transfer_training, find_transfer_experiments
-        exp_dir = maze_name
-        if exp_dir is None:
-            exps = find_transfer_experiments("runs")
+
+        if args.experiment_dir:
+            exp_dir = args.experiment_dir
+        elif args.latest:
+            exps = find_transfer_experiments(args.runs_dir)
             if not exps:
-                print("No transfer experiments found in runs/")
+                print(f"No transfer experiments found in {args.runs_dir}/")
                 sys.exit(1)
             exp_dir = str(exps[-1])
-        plot_transfer_training(exp_dir, window=window, show=True)
+            print(f"Using latest transfer run: {exp_dir}")
+        else:
+            parser.error(
+                "Use --transfer with --latest or --experiment-dir PATH"
+            )
+
+        plot_transfer_training(
+            exp_dir, window=args.window, show=args.show
+        )
     else:
-        visualize_comparison(base_dir, maze_name, window)
+        if args.base_dir.startswith("-"):
+            parser.error(
+                f"Unknown argument '{args.base_dir}'. "
+                f"For transfer plots: python visualize_results.py --transfer --latest"
+            )
+        visualize_comparison(args.base_dir, args.maze, args.window)
