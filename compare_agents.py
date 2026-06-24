@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from tqdm import tqdm
 
-from train import train, get_checkpoint_episodes
+from train import train, get_checkpoint_episodes, resolve_network_class
 from agents import SmallDQNNetwork
 from utils import ExperimentLogger
 
@@ -390,7 +390,7 @@ def main():
     parser.add_argument("--log_dir", type=str, default="experiments",
                         help="Directory for experiment logs")
     parser.add_argument("--eta", type=float, default=0.9,
-                        help="Balance between TD and mood (0.9 = 90% TD, 10% mood)")
+                        help="η in Q_target = Q + ηδ; shared by baseline and emotional agents")
 
     parser.add_argument("--quick_test", action="store_true",
                         help="Run quick test to verify agents work")
@@ -444,9 +444,7 @@ def main():
     if args.analysis_episodes:
         analysis_episodes = [int(e) for e in args.analysis_episodes.split(",")]
 
-    network_class = None
-    if args.network_size == "small":
-        network_class = SmallDQNNetwork
+    network_class = resolve_network_class(args.network_size, args.image_size)
 
     if args.quick_test:
         quick_test(

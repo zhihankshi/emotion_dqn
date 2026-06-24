@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents import SmallDQNNetwork
-from train import train
+from train import train, resolve_network_class
 
 
 def resolve_transfer_checkpoint(run_log_dir: Path, n_episodes: int) -> Path:
@@ -234,7 +234,7 @@ def main():
 
     args = parser.parse_args()
 
-    network_class = SmallDQNNetwork if args.network_size == "small" else None
+    network_class = resolve_network_class(args.network_size, args.image_size)
 
     config = {
         "learning_rate": args.lr,

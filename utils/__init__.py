@@ -13,7 +13,10 @@ from .visualization import (
     find_latest_transfer,
     load_transfer_experiment,
     build_transfer_long_dataframe,
+    build_comparison_dataframe,
+    plot_agent_comparison,
     plot_transfer_training,
+    print_comparison_summary,
 )
 
 __all__ = [
@@ -33,5 +36,8 @@ __all__ = [
     'find_latest_transfer',
     'load_transfer_experiment',
     'build_transfer_long_dataframe',
+    'build_comparison_dataframe',
+    'plot_agent_comparison',
     'plot_transfer_training',
+    'print_comparison_summary',
 ]

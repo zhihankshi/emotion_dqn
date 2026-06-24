@@ -1,6 +1,11 @@
 """
 Baseline Deep Q-Network (DQN) Agent.
-Based on the Nature DQN paper (Mnih et al., 2015).
+
+Value learning follows paper eq. 3.1.3 (Emanuel & Eldar, 2023):
+    Q_target = Q + η * δ
+
+With η=1 this reduces to standard full-TD DQN. Use the same η as the
+emotional agent so comparisons isolate the mood term (eq. 3.4.1).
 """
 import torch
 import torch.nn as nn
@@ -102,6 +107,7 @@ class DQNAgent:
         buffer_size: int = 50000,
         batch_size: int = 32,
         target_update_freq: int = 1000,
+        eta: float = 0.9,
         device: Optional[str] = None,
         seed: Optional[int] = None,
         network_class=None
@@ -119,6 +125,8 @@ class DQNAgent:
             buffer_size: Replay buffer capacity
             batch_size: Training batch size
             target_update_freq: Steps between target network updates
+            eta: TD learning rate in Q_target = Q + ηδ (paper eq. 3.1.3).
+                 Use the same value as the emotional agent (default 0.9).
             device: 'cuda' or 'cpu' (auto-detect if None)
             seed: Random seed
             network_class: Network class to use (default: DQNNetwork)
@@ -128,6 +136,7 @@ class DQNAgent:
         self.gamma = gamma
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
+        self.eta = eta
         
         # Exploration parameters
         self.epsilon = epsilon_start
@@ -227,13 +236,12 @@ class DQNAgent:
         # Current Q values
         current_q = self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
         
-        # Target Q values
+        # Target Q values (paper eq. 3.1.3: Q + ηδ)
         with torch.no_grad():
             next_q = self.target_net(next_states_t).max(dim=1)[0]
-            target_q = rewards_t + self.gamma * next_q * (1 - dones_t)
-        
-        # TD error
-        td_error = target_q - current_q
+            standard_target = rewards_t + self.gamma * next_q * (1 - dones_t)
+            td_error = standard_target - current_q
+            target_q = current_q.detach() + self.eta * td_error.detach()
         
         # Loss
         loss = F.mse_loss(current_q, target_q)
@@ -253,10 +261,12 @@ class DQNAgent:
         
         return {
             'loss': loss.item(),
+            'td_error': td_error.mean().item(),
             'td_error_mean': td_error.mean().item(),
             'td_error_std': td_error.std().item(),
             'q_value_mean': current_q.mean().item(),
             'q_value_max': current_q.max().item(),
+            'eta': self.eta,
         }
     
     def step(
@@ -308,6 +318,7 @@ class DQNAgent:
             'steps': self.steps,
             'updates': self.updates,
             'epsilon': self.epsilon,
+            'eta': self.eta,
         }, path)
 
     def save_checkpoint(self, path: str, episode: int) -> None:
@@ -328,6 +339,7 @@ class DQNAgent:
 
         self.policy_net.load_state_dict(checkpoint['policy_net'])
         self.epsilon = checkpoint['epsilon']
+        self.eta = checkpoint.get('eta', self.eta)
         return int(checkpoint['episode'])
     
     def load(self, path: str) -> None:
@@ -340,6 +352,7 @@ class DQNAgent:
         self.steps = checkpoint['steps']
         self.updates = checkpoint['updates']
         self.epsilon = checkpoint['epsilon']
+        self.eta = checkpoint.get('eta', self.eta)
 
 
 # Quick test

@@ -11,6 +11,309 @@ from typing import Dict, Any, List, Optional, Tuple
 import json
 
 
+# Shared styling (comparison + transfer plots)
+AGENT_LABELS = {"baseline": "Baseline", "emotional": "Emotional"}
+AGENT_PALETTE = {"Baseline": "#2563eb", "Emotional": "#e11d48"}
+HUE_ORDER = ["Baseline", "Emotional"]
+
+
+def _set_plot_theme() -> None:
+    sns.set_theme(style="whitegrid", context="notebook", font_scale=1.05)
+
+
+def _get_column(df: pd.DataFrame, options: List[str]) -> Optional[str]:
+    for col in options:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _add_optimal_benchmark_line(
+    ax,
+    maze_name: Optional[str],
+    metric: str,
+) -> None:
+    """Add a single-maze optimal reference line (no scatter markers)."""
+    from .maze_benchmarks import OPTIMAL_ACTIONS, get_maze_benchmark
+
+    if not maze_name or maze_name not in OPTIMAL_ACTIONS:
+        return
+    bench = get_maze_benchmark(maze_name)
+    if metric == "reward":
+        val = bench["reward"]
+        label = f"Optimal reward ({val:.2f})"
+    else:
+        val = bench["steps"]
+        label = f"Optimal steps ({val})"
+    ax.axhline(
+        val, color="#16a34a", linestyle=":", linewidth=2.2, label=label, zorder=1,
+    )
+
+
+def _aggregate_runs(df: pd.DataFrame) -> pd.DataFrame:
+    """Average metrics across runs when multiple run_id groups are present."""
+    if df.empty or "run_id" not in df.columns or df["run_id"].nunique() <= 1:
+        return df.sort_values("episode") if "episode" in df.columns else df
+    return (
+        df.groupby("episode", as_index=False)
+        .mean(numeric_only=True)
+        .sort_values("episode")
+    )
+
+
+def build_comparison_dataframe(
+    data: Dict[str, pd.DataFrame],
+    window: int,
+) -> pd.DataFrame:
+    """Build long dataframe with rolling metrics for seaborn line plots."""
+    frames = []
+    for agent_key, raw_df in data.items():
+        if raw_df.empty:
+            continue
+        df = _aggregate_runs(raw_df.copy())
+        if "episode" not in df.columns:
+            df = df.reset_index().rename(columns={"index": "episode"})
+
+        label = AGENT_LABELS.get(agent_key, agent_key.capitalize())
+        df["agent_type"] = label
+
+        reward_col = _get_column(df, ["total_reward", "reward", "episode_reward"])
+        if reward_col:
+            df["avg_reward"] = df[reward_col].rolling(window, min_periods=1).mean()
+
+        steps_col = _get_column(df, ["steps", "length", "episode_length"])
+        if steps_col:
+            df["avg_steps"] = df[steps_col].rolling(window, min_periods=1).mean()
+
+        success_col = _get_column(df, ["success", "succeeded", "done"])
+        if success_col:
+            df["success_pct"] = (
+                df[success_col].astype(float).rolling(window, min_periods=1).mean() * 100
+            )
+
+        mood_col = _get_column(
+            df, ["mean_overall_mood", "mood", "mean_mood", "avg_mood"]
+        )
+        if mood_col:
+            df["avg_mood"] = df[mood_col].rolling(window, min_periods=1).mean()
+
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def plot_agent_comparison(
+    data: Dict[str, pd.DataFrame],
+    maze_name: Optional[str] = None,
+    window: int = 50,
+    save_path: Optional[str] = None,
+    show: bool = False,
+    title: Optional[str] = None,
+    figsize: Tuple[int, int] = (14, 11),
+) -> plt.Figure:
+    """
+    Baseline vs emotional comparison with the same seaborn styling as transfer plots.
+    """
+    _set_plot_theme()
+    plot_df = build_comparison_dataframe(data, window)
+    if plot_df.empty:
+        raise ValueError("No episode data to plot")
+
+    hue_order = [a for a in HUE_ORDER if a in plot_df["agent_type"].unique()]
+    has_mood = (
+        "avg_mood" in plot_df.columns
+        and plot_df.loc[plot_df["agent_type"] == "Emotional", "avg_mood"].notna().any()
+    )
+
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+
+    fig.suptitle(
+        title or f"Baseline vs Emotional DQN{f' ({maze_name})' if maze_name else ''}",
+        fontsize=15,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    def _linepanel(ax, y_col: str, ylabel: str, title_text: str, ylim=None):
+        sns.lineplot(
+            data=plot_df,
+            x="episode",
+            y=y_col,
+            hue="agent_type",
+            hue_order=hue_order,
+            palette=AGENT_PALETTE,
+            linewidth=2.5,
+            ax=ax,
+            errorbar=None,
+        )
+        ax.set_xlabel("Episode")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{title_text} (rolling window = {window})")
+        ax.legend(loc="upper right", frameon=True, fontsize=9)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+
+    # Reward
+    ax = axes[0, 0]
+    if "avg_reward" in plot_df.columns:
+        _linepanel(ax, "avg_reward", "Average Reward", "Average Reward per Episode")
+        _add_optimal_benchmark_line(ax, maze_name, "reward")
+    else:
+        ax.set_visible(False)
+
+    # Success rate
+    ax = axes[0, 1]
+    if "success_pct" in plot_df.columns:
+        _linepanel(
+            ax, "success_pct", "Success Rate (%)", "Success Rate", ylim=(0, 105)
+        )
+    else:
+        ax.set_visible(False)
+
+    # Steps
+    ax = axes[1, 0]
+    if "avg_steps" in plot_df.columns:
+        _linepanel(ax, "avg_steps", "Average Steps", "Average Steps per Episode")
+        _add_optimal_benchmark_line(ax, maze_name, "steps")
+    else:
+        ax.set_visible(False)
+
+    # Mood (emotional only)
+    ax = axes[1, 1]
+    if has_mood:
+        mood_df = plot_df[plot_df["agent_type"] == "Emotional"]
+        sns.lineplot(
+            data=mood_df,
+            x="episode",
+            y="avg_mood",
+            color=AGENT_PALETTE["Emotional"],
+            linewidth=2.5,
+            ax=ax,
+            errorbar=None,
+            label="Emotional",
+        )
+        ax.axhline(0, color="black", linestyle=":", alpha=0.55)
+        ax.axhline(1, color="#9ca3af", linestyle=":", alpha=0.45)
+        ax.axhline(-1, color="#9ca3af", linestyle=":", alpha=0.45)
+        ax.set_ylim(-1.15, 1.15)
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Average Mood")
+        ax.set_title(f"Average Mood (rolling window = {window})")
+        ax.legend(loc="upper right", frameon=True, fontsize=9)
+    else:
+        ax.text(
+            0.5, 0.5, "No mood data", ha="center", va="center",
+            transform=ax.transAxes, fontsize=11, color="#6b7280",
+        )
+        ax.set_title("Average Mood")
+        ax.axis("off")
+
+    # Footer summary
+    summary_parts = []
+    for agent_key, label in AGENT_LABELS.items():
+        if agent_key not in data or data[agent_key].empty:
+            continue
+        df = data[agent_key]
+        reward_col = _get_column(df, ["total_reward", "reward", "episode_reward"])
+        steps_col = _get_column(df, ["steps", "length", "episode_length"])
+        success_col = _get_column(df, ["success", "succeeded", "done"])
+        chunk = label
+        if reward_col:
+            chunk += f" — reward {df[reward_col].mean():.2f}"
+        if steps_col:
+            chunk += f", steps {df[steps_col].mean():.1f}"
+        if success_col:
+            chunk += f", success {df[success_col].mean() * 100:.1f}%"
+        summary_parts.append(chunk)
+    if summary_parts:
+        fig.text(
+            0.5, 0.01, "  |  ".join(summary_parts),
+            ha="center", fontsize=9, color="#374151",
+        )
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    if save_path:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved plot to: {save_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig
+
+
+def print_comparison_summary(data: Dict[str, pd.DataFrame]) -> None:
+    """Print summary statistics for baseline vs emotional runs."""
+    print("\n" + "=" * 60)
+    print("SUMMARY STATISTICS")
+    print("=" * 60)
+
+    for agent_type, df in data.items():
+        if df.empty:
+            continue
+        print(f"\n{agent_type.upper()}:")
+        reward_col = _get_column(df, ["total_reward", "reward", "episode_reward"])
+        if reward_col:
+            print(
+                f"  Reward - Mean: {df[reward_col].mean():.2f}, "
+                f"Std: {df[reward_col].std():.2f}"
+            )
+        success_col = _get_column(df, ["success", "succeeded", "done"])
+        if success_col:
+            print(f"  Success Rate: {df[success_col].mean() * 100:.1f}%")
+            successes = df[df[success_col] == True]
+            if len(successes) > 0:
+                print(f"  First Success: Episode {successes.index[0]}")
+        steps_col = _get_column(df, ["steps", "length", "episode_length"])
+        if steps_col:
+            print(
+                f"  Steps - Mean: {df[steps_col].mean():.1f}, "
+                f"Std: {df[steps_col].std():.1f}"
+            )
+
+    if "baseline" in data and "emotional" in data:
+        b_df, e_df = data["baseline"], data["emotional"]
+        if b_df.empty or e_df.empty:
+            return
+        print("\n" + "=" * 60)
+        print("COMPARISON")
+        print("=" * 60)
+        success_col = _get_column(b_df, ["success", "succeeded", "done"])
+        if success_col:
+            b_success = b_df[success_col].mean() * 100
+            e_success = e_df[success_col].mean() * 100
+            rel = (
+                (e_success - b_success) / b_success * 100 if b_success > 0 else float("inf")
+            )
+            print(
+                f"  Success Rate: {b_success:.1f}% → {e_success:.1f}% "
+                f"({rel:+.1f}% relative)"
+            )
+        reward_col = _get_column(b_df, ["total_reward", "reward", "episode_reward"])
+        if reward_col:
+            b_reward = b_df[reward_col].mean()
+            e_reward = e_df[reward_col].mean()
+            print(
+                f"  Avg Reward: {b_reward:.2f} → {e_reward:.2f} "
+                f"({e_reward - b_reward:+.2f})"
+            )
+        steps_col = _get_column(b_df, ["steps", "length", "episode_length"])
+        if steps_col:
+            b_steps = b_df[steps_col].mean()
+            e_steps = e_df[steps_col].mean()
+            print(
+                f"  Avg Steps: {b_steps:.1f} → {e_steps:.1f} "
+                f"({e_steps - b_steps:+.1f})"
+            )
+
+
 def load_episode_data(csv_path: str) -> pd.DataFrame:
     """Load episode data from CSV file."""
     return pd.read_csv(csv_path)
@@ -382,124 +685,20 @@ def plot_causal_understanding(
 def plot_comparison_summary(
     results: Dict[str, pd.DataFrame],
     save_path: Optional[str] = None,
-    figsize: Tuple[int, int] = (14, 10)
+    figsize: Tuple[int, int] = (14, 11),
+    window: int = 50,
+    maze_name: Optional[str] = None,
 ) -> plt.Figure:
-    """
-    Create a comprehensive comparison figure with multiple subplots.
-    """
-    fig, axes = plt.subplots(2, 2, figsize=figsize)
-    
-    colors = {'baseline': '#1f77b4', 'emotional': '#ff7f0e'}
-    labels = {'baseline': 'Baseline DQN', 'emotional': 'Emotional DQN'}
-    smooth_window = 20
-    
-    # 1. Success Rate (top left)
-    ax = axes[0, 0]
-    for agent_type, df in results.items():
-        if df.empty:
-            continue
-        
-        runs = df['run_id'].unique()
-        all_success_rates = []
-        
-        for run_id in runs:
-            run_df = df[df['run_id'] == run_id].sort_values('episode')
-            success_rate = run_df['success'].rolling(window=50, min_periods=1).mean()
-            all_success_rates.append(success_rate.values)
-        
-        min_len = min(len(sr) for sr in all_success_rates)
-        all_success_rates = [sr[:min_len] for sr in all_success_rates]
-        
-        mean_sr = np.mean(all_success_rates, axis=0) * 100
-        std_sr = np.std(all_success_rates, axis=0) * 100
-        episodes = np.arange(min_len)
-        
-        ax.plot(episodes, mean_sr, color=colors[agent_type], label=labels[agent_type], linewidth=2)
-        ax.fill_between(episodes, mean_sr - std_sr, mean_sr + std_sr, color=colors[agent_type], alpha=0.2)
-    
-    ax.set_xlabel('Episode')
-    ax.set_ylabel('Success Rate (%)')
-    ax.set_title('Success Rate')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim(0, 105)
-    
-    # 2. Total Reward (top right)
-    ax = axes[0, 1]
-    for agent_type, df in results.items():
-        if df.empty:
-            continue
-        
-        grouped = df.groupby('episode')['total_reward']
-        mean = grouped.mean().values
-        std = grouped.std().values
-        episodes = grouped.mean().index.values
-        
-        mean_smooth = smooth(mean, smooth_window)
-        std_smooth = smooth(std, smooth_window)
-        episodes_smooth = episodes[:len(mean_smooth)]
-        
-        ax.plot(episodes_smooth, mean_smooth, color=colors[agent_type], label=labels[agent_type], linewidth=2)
-        ax.fill_between(episodes_smooth, mean_smooth - std_smooth, mean_smooth + std_smooth, color=colors[agent_type], alpha=0.2)
-    
-    ax.set_xlabel('Episode')
-    ax.set_ylabel('Total Reward')
-    ax.set_title('Episode Reward')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    # 3. Steps per Episode (bottom left)
-    ax = axes[1, 0]
-    for agent_type, df in results.items():
-        if df.empty:
-            continue
-        
-        grouped = df.groupby('episode')['steps']
-        mean = grouped.mean().values
-        std = grouped.std().values
-        episodes = grouped.mean().index.values
-        
-        mean_smooth = smooth(mean, smooth_window)
-        std_smooth = smooth(std, smooth_window)
-        episodes_smooth = episodes[:len(mean_smooth)]
-        
-        ax.plot(episodes_smooth, mean_smooth, color=colors[agent_type], label=labels[agent_type], linewidth=2)
-        ax.fill_between(episodes_smooth, mean_smooth - std_smooth, mean_smooth + std_smooth, color=colors[agent_type], alpha=0.2)
-    
-    ax.set_xlabel('Episode')
-    ax.set_ylabel('Steps')
-    ax.set_title('Steps per Episode (lower is better)')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    # 4. Door Attempts Without Key (bottom right)
-    ax = axes[1, 1]
-    for agent_type, df in results.items():
-        if df.empty:
-            continue
-        
-        grouped = df.groupby('episode')['door_attempts_without_key']
-        mean = grouped.mean().values
-        episodes = grouped.mean().index.values
-        
-        mean_smooth = smooth(mean, smooth_window)
-        episodes_smooth = episodes[:len(mean_smooth)]
-        
-        ax.plot(episodes_smooth, mean_smooth, color=colors[agent_type], label=labels[agent_type], linewidth=2)
-    
-    ax.set_xlabel('Episode')
-    ax.set_ylabel('Door Attempts')
-    ax.set_title('Door Attempts Without Key (lower is better)')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Saved: {save_path}")
-    
-    return fig
+    """Create a comparison figure using the shared seaborn styling."""
+    non_empty = {k: v for k, v in results.items() if not v.empty}
+    return plot_agent_comparison(
+        non_empty,
+        maze_name=maze_name,
+        window=window,
+        save_path=save_path,
+        show=False,
+        figsize=figsize,
+    )
 
 
 def generate_all_plots(
@@ -700,7 +899,7 @@ def plot_transfer_training(
     """
     from .maze_benchmarks import get_benchmarks_for_transfer
 
-    sns.set_theme(style="whitegrid", context="notebook", font_scale=1.05)
+    _set_plot_theme()
 
     emotional_df, manifest = build_transfer_long_dataframe(
         experiment_dir, agent_label="Emotional"
@@ -741,8 +940,8 @@ def plot_transfer_training(
             .transform(lambda x: x.rolling(window=window, min_periods=1).mean())
         )
 
-    palette = {"Emotional": "#e11d48", "Baseline": "#2563eb"}
-    hue_order = [a for a in ("Emotional", "Baseline") if a in all_data["agent_type"].unique()]
+    palette = AGENT_PALETTE
+    hue_order = [a for a in HUE_ORDER if a in all_data["agent_type"].unique()]
 
     has_mood = "avg_mood" in all_data.columns
     n_rows = 3 if has_mood else 2

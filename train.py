@@ -37,6 +37,13 @@ def should_save_checkpoint(
     return episode_num in checkpoint_episodes
 
 
+def resolve_network_class(network_size: str, image_size: int):
+    """Pick SmallDQNNetwork for 7x7 or explicit --network_size small."""
+    if network_size == "small" or image_size <= 7:
+        return SmallDQNNetwork
+    return None
+
+
 def create_agent(
     agent_type: str,
     observation_shape: tuple,
@@ -58,6 +65,7 @@ def create_agent(
         'buffer_size': config.get('buffer_size', 50000),
         'batch_size': config.get('batch_size', 32),
         'target_update_freq': config.get('target_update_freq', 1000),
+        'eta': config.get('eta', 0.9),
         'device': device,
         'seed': seed,
         'network_class': network_class,
@@ -69,7 +77,6 @@ def create_agent(
     elif agent_type == 'emotional':
         emotional_params = {
             'lambda_mood': config.get('lambda_mood', 0.8),
-            'eta': config.get('eta', 0.9),
             'mood_bounds': tuple(config.get('mood_bounds', (-1.0, 1.0))),
         }
         return EmotionalDQNAgent(**common_params, **emotional_params)
@@ -227,6 +234,11 @@ def train(
             f"linearly over {n_episodes} episodes"
         )
     
+    if network_class is None and image_size <= 7:
+        network_class = SmallDQNNetwork
+        if verbose:
+            print(f"  Network: {SmallDQNNetwork.__name__} (auto for image_size={image_size})")
+    
     # Create agent
     agent = create_agent(
         agent_type=agent_type,
@@ -383,7 +395,7 @@ def main():
     parser.add_argument('--lambda_mood', type=float, default=0.8,
                        help='Mood persistence (0-1, higher = slower change)')
     parser.add_argument('--eta', type=float, default=0.9,
-                       help='TD vs mood balance in Q-target (0.9 = 90%% TD, 10%% mood)')
+                       help='η in Q_target = Q + ηδ; shared by baseline and emotional agents')
     parser.add_argument('--mood_min', type=float, default=-1.0,
                        help='Lower bound for clipped mood')
     parser.add_argument('--mood_max', type=float, default=1.0,
@@ -401,10 +413,7 @@ def main():
         'mood_bounds': (args.mood_min, args.mood_max),
     }
     
-    # Resolve network class
-    network_class = None
-    if args.network_size == 'small':
-        network_class = SmallDQNNetwork
+    network_class = resolve_network_class(args.network_size, args.image_size)
     
     # Train
     train(

@@ -30,11 +30,23 @@ def main():
         help="Path to emotional transfer_* folder (transfer_manifest.json)",
     )
     parser.add_argument(
-        "--baseline", type=str, default=None,
+        "--experiment-dir",
+        dest="experiment_dir",
+        default=None,
+        help="Same as positional experiment_dir",
+    )
+    parser.add_argument(
+        "--baseline", "--baseline-dir",
+        dest="baseline",
+        type=str,
+        default=None,
         help="Path to baseline transfer_* folder for comparison overlay",
     )
     parser.add_argument(
-        "--runs_dir", type=str, default="runs",
+        "--runs_dir", "--runs-dir",
+        dest="runs_dir",
+        type=str,
+        default="runs",
         help="Search here when using --latest",
     )
     parser.add_argument(
@@ -42,8 +54,15 @@ def main():
         help="Use the most recent emotional transfer run in runs_dir",
     )
     parser.add_argument(
-        "--latest_baseline", action="store_true",
+        "--latest_baseline", "--latest-baseline",
+        dest="latest_baseline",
+        action="store_true",
         help="Use the most recent baseline transfer run for --baseline",
+    )
+    parser.add_argument(
+        "--compare-baseline",
+        action="store_true",
+        help="Overlay latest baseline transfer run on the emotional plot",
     )
     parser.add_argument(
         "--window", type=int, default=100,
@@ -59,18 +78,24 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.latest or args.experiment_dir is None:
-        emotional_dir = _resolve_experiment(args.experiment_dir, args.runs_dir, "emotional")
-    else:
+    if args.experiment_dir:
         emotional_dir = str(Path(args.experiment_dir))
+    elif args.latest:
+        emotional_dir = _resolve_experiment(None, args.runs_dir, "emotional")
+    else:
+        parser.error(
+            "Provide experiment_dir, --experiment-dir PATH, or --latest"
+        )
 
     baseline_dir = None
     if args.baseline:
         baseline_dir = args.baseline
-    elif args.latest_baseline:
+    elif args.latest_baseline or args.compare_baseline:
         baseline_dir = find_latest_transfer(args.runs_dir, "baseline")
         if baseline_dir:
             print(f"Using latest baseline transfer run: {baseline_dir}")
+        elif args.compare_baseline:
+            print("Warning: no baseline transfer run found; plotting emotional only")
 
     plot_transfer_training(
         emotional_dir,
