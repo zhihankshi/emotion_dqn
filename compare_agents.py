@@ -315,12 +315,13 @@ def quick_test(
     test_config = {
         "buffer_size": config.get("buffer_size", 10000),
         "lambda_mood": config.get("lambda_mood", 0.8),
-        "beta": config.get("beta", 1.0),
+        "eta": config.get("eta", 0.9),
+        "mood_bounds": tuple(config.get("mood_bounds", (-1.0, 1.0))),
         **config,
     }
 
     print(f"  lambda_mood: {test_config['lambda_mood']}")
-    print(f"  beta: {test_config['beta']}")
+    print(f"  eta: {test_config['eta']}")
     print(f"  image_size: {image_size}")
     print(f"  network: {network_class.__name__ if network_class else 'DQNNetwork'}")
     print(f"  checkpoint_interval: {checkpoint_interval}")
@@ -415,6 +416,10 @@ def main():
 
     parser.add_argument("--lambda_mood", type=float, default=0.8,
                         help="Mood persistence (0-1, higher = slower change)")
+    parser.add_argument("--mood_min", type=float, default=-1.0,
+                        help="Lower bound for clipped mood")
+    parser.add_argument("--mood_max", type=float, default=1.0,
+                        help="Upper bound for clipped mood")
 
     parser.add_argument("--baseline_checkpoint", type=str, default=None,
                         help="Path to pretrained baseline checkpoint (.pt)")
@@ -432,6 +437,7 @@ def main():
         "batch_size": args.batch_size,
         "lambda_mood": args.lambda_mood,
         "eta": args.eta,
+        "mood_bounds": (args.mood_min, args.mood_max),
     }
 
     analysis_episodes = None

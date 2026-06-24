@@ -68,7 +68,9 @@ def run_transfer_training(
         "gamma": config.get("gamma", 0.99),
         "buffer_size": config.get("buffer_size", 50000),
         "batch_size": config.get("batch_size", 32),
-        "lambda_mood": config.get("lambda_mood", 0.95),
+        "lambda_mood": config.get("lambda_mood", 0.8),
+        "eta": config.get("eta", 0.9),
+        "mood_bounds": tuple(config.get("mood_bounds", (-1.0, 1.0))),
         "epsilon_start": 1.0,
         "epsilon_end": epsilon_end,
     }
@@ -184,11 +186,11 @@ def main():
     )
 
     parser.add_argument(
-        "--source_maze", type=str, default="key_approach",
+        "--source_maze", type=str, default="shield_trap",
         help="Maze for phase 1 training",
     )
     parser.add_argument(
-        "--target_maze", type=str, default="shield_avoidance",
+        "--target_maze", type=str, default="shield_trap_v2",
         help="Maze for phase 2 transfer training",
     )
     parser.add_argument(
@@ -225,7 +227,10 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--buffer_size", type=int, default=50000)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lambda_mood", type=float, default=0.95)
+    parser.add_argument("--lambda_mood", type=float, default=0.8)
+    parser.add_argument("--eta", type=float, default=0.9)
+    parser.add_argument("--mood_min", type=float, default=-1.0)
+    parser.add_argument("--mood_max", type=float, default=1.0)
 
     args = parser.parse_args()
 
@@ -237,6 +242,8 @@ def main():
         "buffer_size": args.buffer_size,
         "batch_size": args.batch_size,
         "lambda_mood": args.lambda_mood,
+        "eta": args.eta,
+        "mood_bounds": (args.mood_min, args.mood_max),
     }
 
     run_transfer_training(

@@ -57,7 +57,9 @@ def verify_maze_mood(
         progress_every=n_episodes,
         checkpoint_interval=n_episodes + 1,
         config={
-            "lambda_mood": 0.95,
+            "lambda_mood": 0.8,
+            "eta": 0.9,
+            "mood_bounds": (-1.0, 1.0),
             "buffer_size": 10000,
             "batch_size": 32,
         },

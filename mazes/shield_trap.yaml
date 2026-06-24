@@ -1,5 +1,5 @@
 name: "shield_trap"
-description: "Simple L-shaped maze: agent must collect shield before crossing trap"
+description: "L-shaped maze: collect shield to mitigate trap damage; net optimal return is negative"
 
 size: [7, 9]
 
@@ -75,13 +75,12 @@ walls:
 traps: []
 
 rewards:
-  step: -0.1
+  step: -0.04
   trap_no_shield: -30.0
   trap_with_shield: -5.0
-  goal: 20.0
-  shield_pickup: 5.0
+  goal: 0
+  shield_pickup: 3.0
   wall_bump: -0.1
-  timeout: -50.0
 
 max_steps: 100
 

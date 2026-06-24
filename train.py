@@ -69,6 +69,8 @@ def create_agent(
     elif agent_type == 'emotional':
         emotional_params = {
             'lambda_mood': config.get('lambda_mood', 0.8),
+            'eta': config.get('eta', 0.9),
+            'mood_bounds': tuple(config.get('mood_bounds', (-1.0, 1.0))),
         }
         return EmotionalDQNAgent(**common_params, **emotional_params)
     
@@ -377,23 +379,26 @@ def main():
     parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size')
     
-    # Emotional parameters (SIMPLIFIED - only 2 now)
-    parser.add_argument('--lambda_mood', type=float, default=0.95,
+    # Emotional parameters
+    parser.add_argument('--lambda_mood', type=float, default=0.8,
                        help='Mood persistence (0-1, higher = slower change)')
-    parser.add_argument('--beta', type=float, default=0.1,
-                       help='Mood influence on Q-targets')
+    parser.add_argument('--eta', type=float, default=0.9,
+                       help='TD vs mood balance in Q-target (0.9 = 90%% TD, 10%% mood)')
+    parser.add_argument('--mood_min', type=float, default=-1.0,
+                       help='Lower bound for clipped mood')
+    parser.add_argument('--mood_max', type=float, default=1.0,
+                       help='Upper bound for clipped mood')
     
     args = parser.parse_args()
     
-    # Build config (SIMPLIFIED)
     config = {
         'learning_rate': args.lr,
         'gamma': args.gamma,
         'buffer_size': args.buffer_size,
         'batch_size': args.batch_size,
-        # Emotional params
         'lambda_mood': args.lambda_mood,
-        'beta': args.beta,
+        'eta': args.eta,
+        'mood_bounds': (args.mood_min, args.mood_max),
     }
     
     # Resolve network class

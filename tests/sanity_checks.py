@@ -501,6 +501,108 @@ def test_shield_avoidance_negative_only():
     return True
 
 
+def test_shield_trap_rewards():
+    """Shield trap: step penalty, shield bonus, negative optimal total."""
+    print("\n" + "="*50)
+    print("TEST: Shield Trap Rewards")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="shield_trap")
+    env.reset()
+
+    optimal_actions = [1] * 4 + [0] * 4 + [3] * 6
+    rewards = []
+    terminated = False
+
+    for action in optimal_actions:
+        _, reward, terminated, truncated, info = env.step(action)
+        rewards.append(reward)
+        if terminated or truncated:
+            break
+
+    assert terminated, "Optimal path should reach goal"
+    assert sum(rewards) < 0, f"Optimal total should be negative, got {sum(rewards)}"
+    assert abs(sum(rewards) - (-2.56)) < 1e-6, f"Expected optimal total -2.56, got {sum(rewards)}"
+    assert env.rewards["shield_pickup"] > 0, "Shield pickup should be positive"
+
+    print(f"  Optimal total: {sum(rewards)}")
+    print("✓ Shield trap rewards configured correctly!")
+    return True
+
+
+def test_shield_trap_v2_rewards():
+    """Shield trap v2: shield path penalty mirrors v1 shield benefit."""
+    print("\n" + "="*50)
+    print("TEST: Shield Trap V2 Transfer Rewards")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="shield_trap_v2")
+    env.reset()
+
+    # Best path: skip shield, cross trap, reach goal
+    direct_actions = [3] * 6
+    direct_rewards = []
+    terminated = False
+    for action in direct_actions:
+        _, reward, terminated, truncated, info = env.step(action)
+        direct_rewards.append(reward)
+        if terminated or truncated:
+            break
+
+    assert terminated
+    direct_total = sum(direct_rewards)
+    assert direct_total < 0, f"Direct path should be negative, got {direct_total}"
+    assert abs(direct_total - (-30.24)) < 1e-6
+
+    # Worse path: collect misleading shield first (v1 habit)
+    env.reset()
+    shield_actions = [1] * 4 + [0] * 4 + [3] * 6
+    shield_rewards = []
+    for action in shield_actions:
+        _, reward, terminated, truncated, info = env.step(action)
+        shield_rewards.append(reward)
+        if terminated or truncated:
+            break
+
+    shield_total = sum(shield_rewards)
+    assert shield_total < direct_total, (
+        "Shield path should be worse than skipping shield"
+    )
+    assert abs(shield_total - (-58.56)) < 1e-6
+
+    # Gap should mirror shield_trap v1 (shield good vs skip shield)
+    v1_env = VisualMazeEnv(maze_name="shield_trap")
+    v1_env.reset()
+    v1_shield_total = 0.0
+    for action in shield_actions:
+        _, reward, term, trunc, _ = v1_env.step(action)
+        v1_shield_total += reward
+        if term or trunc:
+            break
+    v1_env.reset()
+    v1_direct_total = 0.0
+    for action in direct_actions:
+        _, reward, term, trunc, _ = v1_env.step(action)
+        v1_direct_total += reward
+        if term or trunc:
+            break
+    v1_gap = v1_shield_total - v1_direct_total
+    v2_gap = shield_total - direct_total
+    assert abs(abs(v1_gap) - abs(v2_gap)) < 1.5, (
+        f"v2 penalty gap ({v2_gap:.2f}) should mirror v1 benefit gap ({v1_gap:.2f})"
+    )
+
+    assert env.rewards["shield_pickup"] < 0
+    assert env.rewards["trap_with_shield"] < env.rewards["trap_no_shield"]
+
+    print(f"  Direct path total: {direct_total:.2f}")
+    print(f"  Shield path total: {shield_total:.2f}")
+    print(f"  v2 gap (shield worse): {v2_gap:.2f}")
+    print(f"  v1 gap (shield better): {v1_gap:.2f}")
+    print("✓ Shield trap v2 rewards configured correctly!")
+    return True
+
+
 def run_all_tests():
     """Run all sanity checks."""
     print("\n" + "="*60)
@@ -522,6 +624,8 @@ def run_all_tests():
         test_layout_parity,
         test_key_approach_positive_only,
         test_shield_avoidance_negative_only,
+        test_shield_trap_rewards,
+        test_shield_trap_v2_rewards,
     ]
     
     passed = 0

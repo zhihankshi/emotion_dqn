@@ -8,7 +8,10 @@ from .visualization import (
     plot_emotional_metrics,
     plot_causal_understanding,
     plot_comparison_summary,
-    generate_all_plots
+    generate_all_plots,
+    find_transfer_experiments,
+    load_transfer_experiment,
+    plot_transfer_training,
 )
 
 __all__ = [
@@ -24,4 +27,7 @@ __all__ = [
     'plot_causal_understanding',
     'plot_comparison_summary',
     'generate_all_plots',
+    'find_transfer_experiments',
+    'load_transfer_experiment',
+    'plot_transfer_training',
 ]

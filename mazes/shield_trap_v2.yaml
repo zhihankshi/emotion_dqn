@@ -1,5 +1,5 @@
 name: "shield_trap_v2"
-description: "Shield trap transfer maze: shield provides no benefit"
+description: "Transfer maze: shield misleads (-3 pickup, -55 trap); skip-shield vs shield-path gap mirrors shield_trap"
 
 size: [7, 9]
 
@@ -75,13 +75,12 @@ walls:
 traps: []
 
 rewards:
-  step: -0.5
+  step: -0.04
   trap_no_shield: -30.0
-  trap_with_shield: -30.0
-  goal: 20.0
-  shield_pickup: -5.0
-  wall_bump: -0.5
-  timeout: -50.0
+  trap_with_shield: -55.0
+  goal: 0
+  shield_pickup: -3.0
+  wall_bump: -0.1
 
 max_steps: 100
 

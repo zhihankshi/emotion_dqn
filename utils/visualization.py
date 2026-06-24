@@ -542,6 +542,253 @@ def generate_all_plots(
     print(f"\nAll plots saved to: {output_dir}")
 
 
+def find_transfer_experiments(base_dir: str = "runs") -> List[Path]:
+    """Find transfer experiment directories containing transfer_manifest.json."""
+    base = Path(base_dir)
+    if not base.exists():
+        return []
+    experiments = [
+        p.parent for p in base.rglob("transfer_manifest.json")
+    ]
+    return sorted(experiments, key=lambda p: p.name)
+
+
+def load_transfer_experiment(experiment_dir: str) -> Dict[str, Any]:
+    """
+    Load transfer manifest and episode CSVs for both phases.
+
+    Returns dict with manifest, phase1_df, phase2_df, episode_csv paths.
+    """
+    experiment_dir = Path(experiment_dir)
+    manifest_path = experiment_dir / "transfer_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"No transfer_manifest.json in {experiment_dir}")
+
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+
+    def _load_phase_csv(log_dir_key: str) -> Tuple[pd.DataFrame, Path]:
+        log_dir = Path(manifest[log_dir_key])
+        csv_files = sorted(log_dir.glob("*_episodes.csv"))
+        if not csv_files:
+            raise FileNotFoundError(f"No episode CSV in {log_dir}")
+        return pd.read_csv(csv_files[0]), csv_files[0]
+
+    phase1_df, phase1_csv = _load_phase_csv("phase1_log_dir")
+    phase2_df, phase2_csv = _load_phase_csv("phase2_log_dir")
+
+    return {
+        "manifest": manifest,
+        "experiment_dir": experiment_dir,
+        "phase1_df": phase1_df,
+        "phase2_df": phase2_df,
+        "phase1_csv": phase1_csv,
+        "phase2_csv": phase2_csv,
+    }
+
+
+def _rolling_series(values: pd.Series, window: int) -> pd.Series:
+    return values.rolling(window=window, min_periods=1).mean()
+
+
+def _add_phase_background(ax, transfer_episode: int, n_total: int) -> None:
+    ax.axvspan(0, transfer_episode, color="#dbeafe", alpha=0.35, zorder=0)
+    ax.axvspan(transfer_episode, n_total, color="#ffedd5", alpha=0.35, zorder=0)
+    ax.axvline(
+        transfer_episode, color="#374151", linestyle="--", linewidth=1.5, alpha=0.8
+    )
+
+
+def _add_optimal_marker(
+    ax,
+    y: float,
+    x_start: int,
+    x_end: int,
+    label: str,
+    color: str = "#16a34a",
+) -> None:
+    ax.hlines(
+        y, x_start, x_end, colors=color, linestyles="--", linewidth=2, label=label
+    )
+    ax.scatter(
+        [x_end], [y], color=color, marker="*", s=120, zorder=5, edgecolors="white"
+    )
+
+
+def plot_transfer_training(
+    experiment_dir: str,
+    window: int = 20,
+    save_path: Optional[str] = None,
+    show: bool = False,
+    figsize: Tuple[int, int] = (14, 11),
+) -> plt.Figure:
+    """
+    Plot transfer training: reward, steps, and mood across both phases.
+
+    Includes phase shading, transfer boundary, and optimal reference lines.
+    """
+    from .maze_benchmarks import get_benchmarks_for_transfer
+
+    data = load_transfer_experiment(experiment_dir)
+    manifest = data["manifest"]
+    df1 = data["phase1_df"]
+    df2 = data["phase2_df"]
+
+    source = manifest["source_maze"]
+    target = manifest["target_maze"]
+    n1 = len(df1)
+    n2 = len(df2)
+    transfer_ep = n1
+    n_total = n1 + n2
+
+    benchmarks = get_benchmarks_for_transfer(source, target)
+    opt1_r, opt1_s = benchmarks["phase1"]["reward"], benchmarks["phase1"]["steps"]
+    opt2_r, opt2_s = benchmarks["phase2"]["reward"], benchmarks["phase2"]["steps"]
+
+    combined_reward = pd.concat(
+        [df1["total_reward"], df2["total_reward"]], ignore_index=True
+    )
+    episodes = np.arange(n_total)
+
+    roll_reward_1 = _rolling_series(df1["total_reward"], window)
+    roll_reward_2 = _rolling_series(df2["total_reward"], window)
+    roll_steps_1 = _rolling_series(df1["steps"], window)
+    roll_steps_2 = _rolling_series(df2["steps"], window)
+
+    has_mood = (
+        "mean_overall_mood" in df1.columns and "mean_overall_mood" in df2.columns
+    )
+    if has_mood:
+        roll_mood_1 = _rolling_series(df1["mean_overall_mood"], window)
+        roll_mood_2 = _rolling_series(df2["mean_overall_mood"], window)
+
+    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    agent = manifest.get("agent_type", "agent")
+    fig.suptitle(
+        f"Transfer Training: {source} → {target} ({agent})",
+        fontsize=14,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    # --- Reward ---
+    ax = axes[0]
+    _add_phase_background(ax, transfer_ep, n_total)
+    ax.plot(episodes[:n1], combined_reward.iloc[:n1], color="#93c5fd", alpha=0.25)
+    ax.plot(episodes[n1:], combined_reward.iloc[n1:], color="#fdba74", alpha=0.25)
+    ax.plot(np.arange(n1), roll_reward_1, color="#1d4ed8", linewidth=2.5,
+            label=f"Phase 1 avg ({source})")
+    ax.plot(np.arange(n1, n_total), roll_reward_2, color="#c2410c", linewidth=2.5,
+            label=f"Phase 2 avg ({target})")
+    _add_optimal_marker(
+        ax, opt1_r, 0, n1,
+        f"Phase 1 optimal: {opt1_r:.2f}",
+    )
+    _add_optimal_marker(
+        ax, opt2_r, n1, n_total,
+        f"Phase 2 optimal: {opt2_r:.2f}",
+        color="#15803d",
+    )
+    ax.set_ylabel("Total Reward")
+    ax.set_title(f"Average Reward (rolling window = {window})")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # --- Steps ---
+    ax = axes[1]
+    _add_phase_background(ax, transfer_ep, n_total)
+    ax.plot(np.arange(n1), roll_steps_1, color="#1d4ed8", linewidth=2.5,
+            label=f"Phase 1 avg steps")
+    ax.plot(np.arange(n1, n_total), roll_steps_2, color="#c2410c", linewidth=2.5,
+            label=f"Phase 2 avg steps")
+    _add_optimal_marker(
+        ax, opt1_s, 0, n1,
+        f"Phase 1 optimal: {opt1_s} steps",
+        color="#16a34a",
+    )
+    _add_optimal_marker(
+        ax, opt2_s, n1, n_total,
+        f"Phase 2 optimal: {opt2_s} steps",
+        color="#15803d",
+    )
+    ax.set_ylabel("Steps")
+    ax.set_title("Average Steps per Episode")
+    ax.legend(loc="upper right", fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # --- Mood ---
+    ax = axes[2]
+    _add_phase_background(ax, transfer_ep, n_total)
+    if has_mood:
+        ax.plot(np.arange(n1), roll_mood_1, color="#7c3aed", linewidth=2.5,
+                label="Phase 1 mood")
+        ax.plot(np.arange(n1, n_total), roll_mood_2, color="#a21caf", linewidth=2.5,
+                label="Phase 2 mood")
+        ax.axhline(0, color="black", linestyle=":", alpha=0.6)
+        ax.axhline(1, color="gray", linestyle=":", alpha=0.4)
+        ax.axhline(-1, color="gray", linestyle=":", alpha=0.4)
+        ax.set_ylim(-1.15, 1.15)
+        ax.set_ylabel("Mood")
+        ax.set_title("Average Mood (clipped to [-1, 1] during training)")
+        ax.legend(loc="upper right", fontsize=9)
+    else:
+        ax.text(
+            0.5, 0.5, "No mood data in episode logs",
+            ha="center", va="center", transform=ax.transAxes,
+        )
+        ax.set_ylabel("Mood")
+    ax.grid(True, alpha=0.3)
+
+    axes[-1].set_xlabel("Episode (phase 2 continues after transfer)")
+    axes[0].text(
+        n1 * 0.5, -0.18, f"Phase 1: {source}",
+        ha="center", va="top", fontsize=10, color="#1e40af",
+        transform=axes[0].get_xaxis_transform(),
+    )
+    axes[0].text(
+        (n1 + n_total) * 0.5 / max(n_total, 1), -0.18, f"Phase 2: {target}",
+        ha="center", va="top", fontsize=10, color="#9a3412",
+        transform=axes[0].get_xaxis_transform(),
+    )
+    axes[0].annotate(
+        "transfer",
+        xy=(transfer_ep, 1.0), xycoords=("data", "axes fraction"),
+        xytext=(6, -6), textcoords="offset points",
+        fontsize=9, color="#374151", rotation=90, va="top",
+    )
+
+    # Summary annotation
+    summary = (
+        f"Phase 1 ({n1} ep): reward {df1['total_reward'].mean():.2f}, "
+        f"steps {df1['steps'].mean():.1f}  |  "
+        f"Phase 2 ({n2} ep): reward {df2['total_reward'].mean():.2f}, "
+        f"steps {df2['steps'].mean():.1f}"
+    )
+    if has_mood:
+        summary += (
+            f"  |  mood {df1['mean_overall_mood'].mean():.3f} → "
+            f"{df2['mean_overall_mood'].mean():.3f}"
+        )
+    fig.text(0.5, 0.01, summary, ha="center", fontsize=9, color="#374151")
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+
+    if save_path is None:
+        save_path = Path(experiment_dir) / "transfer_training.png"
+    else:
+        save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved transfer plot to: {save_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig
+
+
 # Command line interface
 if __name__ == "__main__":
     import argparse

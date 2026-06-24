@@ -4,6 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
+from typing import Optional
+
+from utils.maze_benchmarks import OPTIMAL_ACTIONS, get_maze_benchmark
 
 
 def find_runs(base_dir: str = "test_runs", maze_name: str = None) -> dict:
@@ -32,6 +35,41 @@ def find_runs(base_dir: str = "test_runs", maze_name: str = None) -> dict:
     return runs
 
 
+def _infer_maze_name(run_dir: Path, maze_filter: str = None) -> Optional[str]:
+    """Guess maze name from directory name or filter."""
+    if maze_filter:
+        return maze_filter
+    for name in OPTIMAL_ACTIONS:
+        if name in run_dir.name:
+            return name
+    return None
+
+
+def _add_optimal_hline(ax, maze_name: str, metric: str) -> None:
+    """Add optimal reward or steps reference line if maze is known."""
+    if maze_name not in OPTIMAL_ACTIONS:
+        return
+    bench = get_maze_benchmark(maze_name)
+    if metric == "reward":
+        ax.axhline(
+            bench["reward"], color="#16a34a", linestyle="--", linewidth=2,
+            label=f"Optimal reward ({bench['reward']:.2f})",
+        )
+        ax.scatter(
+            [ax.get_xlim()[1]], [bench["reward"]],
+            color="#16a34a", marker="*", s=100, zorder=5, edgecolors="white",
+        )
+    elif metric == "steps":
+        ax.axhline(
+            bench["steps"], color="#16a34a", linestyle="--", linewidth=2,
+            label=f"Optimal steps ({bench['steps']})",
+        )
+        ax.scatter(
+            [ax.get_xlim()[1]], [bench["steps"]],
+            color="#16a34a", marker="*", s=100, zorder=5, edgecolors="white",
+        )
+
+
 def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, window: int = 10):
     """
     Visualize comparison between baseline and emotional agents.
@@ -53,11 +91,14 @@ def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, win
     
     # Load data from most recent runs
     data = {}
+    run_maze = maze_name
     for agent_type, run_list in runs.items():
         if run_list:
             # Sort by directory name (timestamp) and use most recent
             run_dir, csv_file = sorted(run_list, key=lambda x: x[0].name)[-1]
             print(f"\nLoading {agent_type} from: {csv_file}")
+            if run_maze is None:
+                run_maze = _infer_maze_name(run_dir)
             
             df = pd.read_csv(csv_file)
             data[agent_type] = df
@@ -96,6 +137,9 @@ def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, win
             rolling = rewards.rolling(window=window, min_periods=1).mean()
             ax.plot(episodes, rolling, label=f'{agent_type}', 
                     color=colors[agent_type], linewidth=2)
+    
+    if run_maze:
+        _add_optimal_hline(ax, run_maze, "reward")
     
     ax.set_xlabel('Episode')
     ax.set_ylabel('Total Reward')
@@ -138,6 +182,9 @@ def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, win
             ax.plot(episodes, rolling, label=agent_type, 
                     color=colors[agent_type], linewidth=2)
     
+    if run_maze:
+        _add_optimal_hline(ax, run_maze, "steps")
+    
     ax.set_xlabel('Episode')
     ax.set_ylabel('Steps')
     ax.set_title(f'Episode Length (rolling avg {window})')
@@ -162,6 +209,9 @@ def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, win
             ax.plot(episodes, rolling, label='Mood', color='red', linewidth=2)
             
             ax.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+            ax.axhline(y=1, color='gray', linestyle=':', alpha=0.4)
+            ax.axhline(y=-1, color='gray', linestyle=':', alpha=0.4)
+            ax.set_ylim(-1.15, 1.15)
             ax.set_xlabel('Episode')
             ax.set_ylabel('Mood')
             ax.set_title('Emotional Agent Mood')
@@ -178,8 +228,8 @@ def visualize_comparison(base_dir: str = "test_runs", maze_name: str = None, win
     
     # Add overall title
     title = f"Comparison: Baseline vs Emotional DQN"
-    if maze_name:
-        title += f" ({maze_name} maze)"
+    if maze_name or run_maze:
+        title += f" ({maze_name or run_maze} maze)"
     fig.suptitle(title, fontsize=14, fontweight='bold')
     
     plt.tight_layout()
@@ -254,5 +304,16 @@ if __name__ == "__main__":
     base_dir = sys.argv[1] if len(sys.argv) > 1 else "test_runs"
     maze_name = sys.argv[2] if len(sys.argv) > 2 else None
     window = int(sys.argv[3]) if len(sys.argv) > 3 else 10
-    
-    visualize_comparison(base_dir, maze_name, window)
+
+    if base_dir == "--transfer":
+        from utils.visualization import plot_transfer_training, find_transfer_experiments
+        exp_dir = maze_name
+        if exp_dir is None:
+            exps = find_transfer_experiments("runs")
+            if not exps:
+                print("No transfer experiments found in runs/")
+                sys.exit(1)
+            exp_dir = str(exps[-1])
+        plot_transfer_training(exp_dir, window=window, show=True)
+    else:
+        visualize_comparison(base_dir, maze_name, window)

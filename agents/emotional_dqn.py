@@ -25,15 +25,21 @@ class MoodTracker:
     """
     Mood tracker - running average of TD errors.
     
-    M_t+1 = λ * M_t + (1 - λ) * δ_t
+    M_t+1 = clip(λ * M_t + (1 - λ) * δ_t, mood_bounds)
     """
     
-    def __init__(self, lambda_mood: float = 0.8):
+    def __init__(
+        self,
+        lambda_mood: float = 0.8,
+        mood_bounds: Tuple[float, float] = (-1.0, 1.0),
+    ):
         self.lambda_mood = lambda_mood
+        self.mood_bounds = mood_bounds
         self.mood = 0.0
     
     def update(self, td_error: float) -> float:
         self.mood = self.lambda_mood * self.mood + (1 - self.lambda_mood) * td_error
+        self.mood = float(np.clip(self.mood, self.mood_bounds[0], self.mood_bounds[1]))
         return self.mood
     
     def get_mood(self) -> float:
@@ -71,6 +77,7 @@ class EmotionalDQNAgent:
         # Emotion params
         lambda_mood: float = 0.8,
         eta: float = 0.9,
+        mood_bounds: Tuple[float, float] = (-1.0, 1.0),
         # Other
         device: Optional[str] = None,
         seed: Optional[int] = None,
@@ -124,7 +131,11 @@ class EmotionalDQNAgent:
         self.replay_buffer = ReplayBuffer(capacity=buffer_size, seed=seed)
         
         # Mood tracker
-        self.mood_tracker = MoodTracker(lambda_mood=lambda_mood)
+        self.mood_tracker = MoodTracker(
+            lambda_mood=lambda_mood,
+            mood_bounds=mood_bounds,
+        )
+        self.mood_bounds = mood_bounds
         
         # Counters
         self.steps = 0
@@ -294,6 +305,7 @@ class EmotionalDQNAgent:
             'epsilon': self.epsilon,
             'mood': self.mood_tracker.get_mood(),
             'lambda_mood': self.mood_tracker.lambda_mood,
+            'mood_bounds': self.mood_bounds,
             'eta': self.eta,
         }, path)
 
@@ -317,6 +329,14 @@ class EmotionalDQNAgent:
         self.policy_net.load_state_dict(checkpoint['policy_net'])
         self.epsilon = checkpoint['epsilon']
         self.mood_tracker.mood = checkpoint.get('mood', 0.0)
+        if 'mood_bounds' in checkpoint:
+            self.mood_bounds = tuple(checkpoint['mood_bounds'])
+            self.mood_tracker.mood_bounds = self.mood_bounds
+        self.mood_tracker.mood = float(np.clip(
+            self.mood_tracker.mood,
+            self.mood_bounds[0],
+            self.mood_bounds[1],
+        ))
         return int(checkpoint['episode'])
     
     def load(self, path: str) -> None:
@@ -329,6 +349,14 @@ class EmotionalDQNAgent:
         self.updates = checkpoint['updates']
         self.epsilon = checkpoint['epsilon']
         self.mood_tracker.mood = checkpoint.get('mood', 0.0)
+        if 'mood_bounds' in checkpoint:
+            self.mood_bounds = tuple(checkpoint['mood_bounds'])
+            self.mood_tracker.mood_bounds = self.mood_bounds
+        self.mood_tracker.mood = float(np.clip(
+            self.mood_tracker.mood,
+            self.mood_bounds[0],
+            self.mood_bounds[1],
+        ))
         self.eta = checkpoint.get('eta', 0.9)
 
 
