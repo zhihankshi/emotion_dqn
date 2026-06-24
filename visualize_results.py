@@ -321,8 +321,8 @@ if __name__ == "__main__":
         help="Filter runs by maze name (e.g. shield_trap)",
     )
     parser.add_argument(
-        "--window", type=int, default=10,
-        help="Rolling average window (default: 10)",
+        "--window", type=int, default=None,
+        help="Rolling average window (transfer default: 100, comparison default: 10)",
     )
     parser.add_argument(
         "--transfer", action="store_true",
@@ -341,42 +341,65 @@ if __name__ == "__main__":
         help="Search here for transfer experiments when using --latest",
     )
     parser.add_argument(
+        "--baseline-dir", type=str, default=None,
+        help="Baseline transfer_* folder for comparison overlay",
+    )
+    parser.add_argument(
+        "--compare-baseline", action="store_true",
+        help="Auto-pair latest emotional and baseline transfer runs",
+    )
+    parser.add_argument(
         "--show", action="store_true",
         help="Show plot interactively",
     )
     args = parser.parse_args()
 
-    if args.latest and not args.transfer:
-        parser.error(
-            "--latest is for transfer plots only. Use:\n"
-            "  python visualize_results.py --transfer --latest\n"
-            "  python visualize_transfer.py --latest"
-        )
+    # --latest implies transfer mode (most common use case)
+    if args.latest:
+        args.transfer = True
+
+    window = args.window if args.window is not None else (100 if args.transfer else 10)
 
     if args.transfer:
-        from utils.visualization import plot_transfer_training, find_transfer_experiments
+        from utils.visualization import (
+            plot_transfer_training,
+            find_latest_transfer,
+        )
+
+        baseline_dir = args.baseline_dir
+        if args.compare_baseline and baseline_dir is None:
+            baseline_dir = find_latest_transfer(args.runs_dir, "baseline")
+            if baseline_dir:
+                print(f"Using latest baseline transfer run: {baseline_dir}")
+            else:
+                print("Warning: no baseline transfer run found; plotting emotional only")
 
         if args.experiment_dir:
             exp_dir = args.experiment_dir
-        elif args.latest:
-            exps = find_transfer_experiments(args.runs_dir)
-            if not exps:
+        elif args.latest or args.compare_baseline:
+            emotional = find_latest_transfer(args.runs_dir, "emotional")
+            if emotional is None:
+                emotional = find_latest_transfer(args.runs_dir)
+            if emotional is None:
                 print(f"No transfer experiments found in {args.runs_dir}/")
                 sys.exit(1)
-            exp_dir = str(exps[-1])
-            print(f"Using latest transfer run: {exp_dir}")
+            exp_dir = str(emotional)
+            print(f"Using latest emotional transfer run: {exp_dir}")
         else:
             parser.error(
-                "Use --transfer with --latest or --experiment-dir PATH"
+                "Use --latest, --compare-baseline, or --experiment-dir PATH"
             )
 
         plot_transfer_training(
-            exp_dir, window=args.window, show=args.show
+            exp_dir,
+            baseline_dir=str(baseline_dir) if baseline_dir else None,
+            window=window,
+            show=args.show,
         )
     else:
         if args.base_dir.startswith("-"):
             parser.error(
                 f"Unknown argument '{args.base_dir}'. "
-                f"For transfer plots: python visualize_results.py --transfer --latest"
+                f"For transfer plots: python visualize_results.py --latest"
             )
-        visualize_comparison(args.base_dir, args.maze, args.window)
+        visualize_comparison(args.base_dir, args.maze, window)

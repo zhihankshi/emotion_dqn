@@ -4,6 +4,7 @@ gymnasium>=0.29
 numpy>=1.24
 pandas>=2.0
 matplotlib>=3.7
+seaborn>=0.13
 pyyaml>=6.0
 tqdm>=4.65
 pillow>=10.0

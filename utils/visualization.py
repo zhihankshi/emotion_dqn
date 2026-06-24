@@ -5,6 +5,7 @@ Generates plots for comparing agent performance.
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import json
@@ -553,6 +554,25 @@ def find_transfer_experiments(base_dir: str = "runs") -> List[Path]:
     return sorted(experiments, key=lambda p: p.name)
 
 
+def find_latest_transfer(
+    base_dir: str = "runs",
+    agent_type: Optional[str] = None,
+) -> Optional[Path]:
+    """Return latest transfer experiment, optionally filtered by manifest agent_type."""
+    experiments = find_transfer_experiments(base_dir)
+    if agent_type is None:
+        return experiments[-1] if experiments else None
+
+    matches = []
+    for exp in experiments:
+        manifest_path = exp / "transfer_manifest.json"
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        if manifest.get("agent_type") == agent_type:
+            matches.append(exp)
+    return matches[-1] if matches else None
+
+
 def load_transfer_experiment(experiment_dir: str) -> Dict[str, Any]:
     """
     Load transfer manifest and episode CSVs for both phases.
@@ -569,10 +589,13 @@ def load_transfer_experiment(experiment_dir: str) -> Dict[str, Any]:
 
     def _load_phase_csv(log_dir_key: str) -> Tuple[pd.DataFrame, Path]:
         log_dir = Path(manifest[log_dir_key])
-        csv_files = sorted(log_dir.glob("*_episodes.csv"))
-        if not csv_files:
-            raise FileNotFoundError(f"No episode CSV in {log_dir}")
-        return pd.read_csv(csv_files[0]), csv_files[0]
+        agent_type = manifest.get("agent_type", "emotional")
+        df = _load_phase_episode_csv(log_dir, agent_type)
+        csv_path = log_dir / f"{agent_type}_run0_episodes.csv"
+        if not csv_path.exists():
+            csv_files = sorted(log_dir.glob("*_episodes.csv"))
+            csv_path = csv_files[0]
+        return df, csv_path
 
     phase1_df, phase1_csv = _load_phase_csv("phase1_log_dir")
     phase2_df, phase2_csv = _load_phase_csv("phase2_log_dir")
@@ -587,194 +610,249 @@ def load_transfer_experiment(experiment_dir: str) -> Dict[str, Any]:
     }
 
 
-def _rolling_series(values: pd.Series, window: int) -> pd.Series:
-    return values.rolling(window=window, min_periods=1).mean()
+def _load_phase_episode_csv(log_dir: Path, agent_type: str) -> pd.DataFrame:
+    """Load episode CSV from a phase log directory."""
+    preferred = log_dir / f"{agent_type}_run0_episodes.csv"
+    if preferred.exists():
+        return pd.read_csv(preferred)
+    csv_files = sorted(log_dir.glob("*_episodes.csv"))
+    if not csv_files:
+        raise FileNotFoundError(f"No episode CSV in {log_dir}")
+    return pd.read_csv(csv_files[0])
 
 
-def _add_phase_background(ax, transfer_episode: int, n_total: int) -> None:
-    ax.axvspan(0, transfer_episode, color="#dbeafe", alpha=0.35, zorder=0)
-    ax.axvspan(transfer_episode, n_total, color="#ffedd5", alpha=0.35, zorder=0)
-    ax.axvline(
-        transfer_episode, color="#374151", linestyle="--", linewidth=1.5, alpha=0.8
-    )
+def build_transfer_long_dataframe(
+    experiment_dir: str,
+    agent_label: Optional[str] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Combine phase 1 and phase 2 episode logs into one timeline per experiment.
+
+    Returns (dataframe, manifest) with columns including episode_global,
+    phase, maze_name, agent_type, steps, total_reward, mean_overall_mood.
+    """
+    data = load_transfer_experiment(experiment_dir)
+    manifest = data["manifest"]
+    agent_type = manifest.get("agent_type", "emotional")
+    label = agent_label or agent_type.capitalize()
+
+    n1 = manifest.get("phase1_episodes", len(data["phase1_df"]))
+
+    frames = []
+    for phase_df, phase_name, maze_name, offset in (
+        (data["phase1_df"], "Phase 1", manifest["source_maze"], 0),
+        (data["phase2_df"], "Phase 2", manifest["target_maze"], n1),
+    ):
+        part = phase_df.copy()
+        part["agent_type"] = label
+        part["phase"] = phase_name
+        part["maze_name"] = maze_name
+        part["episode_global"] = part["episode"] + offset
+        frames.append(part)
+
+    combined = pd.concat(frames, ignore_index=True)
+    return combined, manifest
 
 
-def _add_optimal_marker(
+def _add_transfer_reference_lines(
     ax,
-    y: float,
-    x_start: int,
-    x_end: int,
-    label: str,
-    color: str = "#16a34a",
+    transfer_ep: int,
+    n_total: int,
+    opt1: float,
+    opt2: float,
+    metric_label: str,
+    phase1_name: str,
+    phase2_name: str,
 ) -> None:
+    """Phase transition and per-phase optimal reference lines (scoped to each phase)."""
+    ax.axvline(
+        transfer_ep, color="#6b7280", linestyle="--", linewidth=1.8,
+        label="Phase transition", zorder=1,
+    )
+    # Optimal benchmarks only in the phase they apply to (clearer than full-width lines).
     ax.hlines(
-        y, x_start, x_end, colors=color, linestyles="--", linewidth=2, label=label
+        opt1, 0, transfer_ep, colors="#16a34a", linestyles=":", linewidth=2.2,
+        label=f"Optimal {metric_label} ({phase1_name})", zorder=1,
     )
-    ax.scatter(
-        [x_end], [y], color=color, marker="*", s=120, zorder=5, edgecolors="white"
+    ax.hlines(
+        opt2, transfer_ep, n_total, colors="#ea580c", linestyles=":", linewidth=2.2,
+        label=f"Optimal {metric_label} ({phase2_name})", zorder=1,
     )
+
+
+def _style_transfer_axes(ax, transfer_ep: int, n_total: int) -> None:
+    ax.axvspan(0, transfer_ep, color="#eff6ff", alpha=0.55, zorder=0)
+    ax.axvspan(transfer_ep, n_total, color="#fff7ed", alpha=0.55, zorder=0)
 
 
 def plot_transfer_training(
     experiment_dir: str,
-    window: int = 20,
+    baseline_dir: Optional[str] = None,
+    window: int = 100,
     save_path: Optional[str] = None,
     show: bool = False,
-    figsize: Tuple[int, int] = (14, 11),
+    figsize: Tuple[int, int] = (14, 13),
 ) -> plt.Figure:
     """
-    Plot transfer training: reward, steps, and mood across both phases.
+    Plot transfer training with seaborn: steps, reward, and mood.
 
-    Includes phase shading, transfer boundary, and optimal reference lines.
+    If baseline_dir is provided, overlays Baseline vs Emotional on the same axes.
     """
     from .maze_benchmarks import get_benchmarks_for_transfer
 
-    data = load_transfer_experiment(experiment_dir)
-    manifest = data["manifest"]
-    df1 = data["phase1_df"]
-    df2 = data["phase2_df"]
+    sns.set_theme(style="whitegrid", context="notebook", font_scale=1.05)
+
+    emotional_df, manifest = build_transfer_long_dataframe(
+        experiment_dir, agent_label="Emotional"
+    )
+    frames = [emotional_df]
+
+    if baseline_dir is not None:
+        baseline_df, _ = build_transfer_long_dataframe(
+            baseline_dir, agent_label="Baseline"
+        )
+        frames.append(baseline_df)
+
+    all_data = pd.concat(frames, ignore_index=True)
+    all_data = all_data.sort_values(["agent_type", "episode_global"]).reset_index(drop=True)
 
     source = manifest["source_maze"]
     target = manifest["target_maze"]
-    n1 = len(df1)
-    n2 = len(df2)
+    n1 = manifest.get("phase1_episodes", len(emotional_df[emotional_df["phase"] == "Phase 1"]))
+    n2 = manifest.get("phase2_episodes", len(emotional_df[emotional_df["phase"] == "Phase 2"]))
     transfer_ep = n1
     n_total = n1 + n2
 
     benchmarks = get_benchmarks_for_transfer(source, target)
-    opt1_r, opt1_s = benchmarks["phase1"]["reward"], benchmarks["phase1"]["steps"]
-    opt2_r, opt2_s = benchmarks["phase2"]["reward"], benchmarks["phase2"]["steps"]
+    opt1_r = benchmarks["phase1"]["reward"]
+    opt2_r = benchmarks["phase2"]["reward"]
+    opt1_s = benchmarks["phase1"]["steps"]
+    opt2_s = benchmarks["phase2"]["steps"]
 
-    combined_reward = pd.concat(
-        [df1["total_reward"], df2["total_reward"]], ignore_index=True
-    )
-    episodes = np.arange(n_total)
+    for metric, col in (("steps", "avg_steps"), ("reward", "avg_reward"), ("mood", "avg_mood")):
+        if metric == "mood":
+            if "mean_overall_mood" not in all_data.columns:
+                continue
+            source_col = "mean_overall_mood"
+        else:
+            source_col = "steps" if metric == "steps" else "total_reward"
+        all_data[col] = (
+            all_data.groupby("agent_type")[source_col]
+            .transform(lambda x: x.rolling(window=window, min_periods=1).mean())
+        )
 
-    roll_reward_1 = _rolling_series(df1["total_reward"], window)
-    roll_reward_2 = _rolling_series(df2["total_reward"], window)
-    roll_steps_1 = _rolling_series(df1["steps"], window)
-    roll_steps_2 = _rolling_series(df2["steps"], window)
+    palette = {"Emotional": "#e11d48", "Baseline": "#2563eb"}
+    hue_order = [a for a in ("Emotional", "Baseline") if a in all_data["agent_type"].unique()]
 
-    has_mood = (
-        "mean_overall_mood" in df1.columns and "mean_overall_mood" in df2.columns
-    )
-    if has_mood:
-        roll_mood_1 = _rolling_series(df1["mean_overall_mood"], window)
-        roll_mood_2 = _rolling_series(df2["mean_overall_mood"], window)
+    has_mood = "avg_mood" in all_data.columns
+    n_rows = 3 if has_mood else 2
+    fig, axes = plt.subplots(n_rows, 1, figsize=figsize, sharex=True)
 
-    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
-    agent = manifest.get("agent_type", "agent")
+    title_agent = "Baseline vs Emotional" if baseline_dir else manifest.get("agent_type", "agent").capitalize()
     fig.suptitle(
-        f"Transfer Training: {source} → {target} ({agent})",
-        fontsize=14,
+        f"Transfer Training: {source} → {target}\n({title_agent})",
+        fontsize=15,
         fontweight="bold",
         y=0.98,
     )
 
-    # --- Reward ---
-    ax = axes[0]
-    _add_phase_background(ax, transfer_ep, n_total)
-    ax.plot(episodes[:n1], combined_reward.iloc[:n1], color="#93c5fd", alpha=0.25)
-    ax.plot(episodes[n1:], combined_reward.iloc[n1:], color="#fdba74", alpha=0.25)
-    ax.plot(np.arange(n1), roll_reward_1, color="#1d4ed8", linewidth=2.5,
-            label=f"Phase 1 avg ({source})")
-    ax.plot(np.arange(n1, n_total), roll_reward_2, color="#c2410c", linewidth=2.5,
-            label=f"Phase 2 avg ({target})")
-    _add_optimal_marker(
-        ax, opt1_r, 0, n1,
-        f"Phase 1 optimal: {opt1_r:.2f}",
-    )
-    _add_optimal_marker(
-        ax, opt2_r, n1, n_total,
-        f"Phase 2 optimal: {opt2_r:.2f}",
-        color="#15803d",
-    )
-    ax.set_ylabel("Total Reward")
-    ax.set_title(f"Average Reward (rolling window = {window})")
-    ax.legend(loc="lower right", fontsize=9)
-    ax.grid(True, alpha=0.3)
-
     # --- Steps ---
+    ax = axes[0]
+    _style_transfer_axes(ax, transfer_ep, n_total)
+    sns.lineplot(
+        data=all_data, x="episode_global", y="avg_steps",
+        hue="agent_type", hue_order=hue_order, palette=palette,
+        linewidth=2.5, ax=ax, errorbar=None,
+    )
+    _add_transfer_reference_lines(
+        ax, transfer_ep, n_total, opt1_s, opt2_s, "steps", source, target,
+    )
+    ax.set_ylabel("Average Steps")
+    ax.set_title(f"Average Steps per Episode (rolling window = {window})")
+    ax.set_xlabel("")
+    ax.legend(loc="upper right", frameon=True, fontsize=9)
+
+    # --- Reward ---
     ax = axes[1]
-    _add_phase_background(ax, transfer_ep, n_total)
-    ax.plot(np.arange(n1), roll_steps_1, color="#1d4ed8", linewidth=2.5,
-            label=f"Phase 1 avg steps")
-    ax.plot(np.arange(n1, n_total), roll_steps_2, color="#c2410c", linewidth=2.5,
-            label=f"Phase 2 avg steps")
-    _add_optimal_marker(
-        ax, opt1_s, 0, n1,
-        f"Phase 1 optimal: {opt1_s} steps",
-        color="#16a34a",
+    _style_transfer_axes(ax, transfer_ep, n_total)
+    sns.lineplot(
+        data=all_data, x="episode_global", y="avg_reward",
+        hue="agent_type", hue_order=hue_order, palette=palette,
+        linewidth=2.5, ax=ax, errorbar=None,
     )
-    _add_optimal_marker(
-        ax, opt2_s, n1, n_total,
-        f"Phase 2 optimal: {opt2_s} steps",
-        color="#15803d",
+    _add_transfer_reference_lines(
+        ax, transfer_ep, n_total, opt1_r, opt2_r, "reward", source, target,
     )
-    ax.set_ylabel("Steps")
-    ax.set_title("Average Steps per Episode")
-    ax.legend(loc="upper right", fontsize=9)
-    ax.grid(True, alpha=0.3)
+    ax.set_ylabel("Average Reward")
+    ax.set_title(f"Average Reward per Episode (rolling window = {window})")
+    ax.set_xlabel("")
+    ax.legend(loc="upper right", frameon=True, fontsize=9)
 
-    # --- Mood ---
-    ax = axes[2]
-    _add_phase_background(ax, transfer_ep, n_total)
+    # --- Mood (emotional agents; baseline mood is usually ~0) ---
     if has_mood:
-        ax.plot(np.arange(n1), roll_mood_1, color="#7c3aed", linewidth=2.5,
-                label="Phase 1 mood")
-        ax.plot(np.arange(n1, n_total), roll_mood_2, color="#a21caf", linewidth=2.5,
-                label="Phase 2 mood")
-        ax.axhline(0, color="black", linestyle=":", alpha=0.6)
-        ax.axhline(1, color="gray", linestyle=":", alpha=0.4)
-        ax.axhline(-1, color="gray", linestyle=":", alpha=0.4)
-        ax.set_ylim(-1.15, 1.15)
-        ax.set_ylabel("Mood")
-        ax.set_title("Average Mood (clipped to [-1, 1] during training)")
-        ax.legend(loc="upper right", fontsize=9)
-    else:
-        ax.text(
-            0.5, 0.5, "No mood data in episode logs",
-            ha="center", va="center", transform=ax.transAxes,
+        ax = axes[2]
+        _style_transfer_axes(ax, transfer_ep, n_total)
+        mood_data = all_data.copy()
+        sns.lineplot(
+            data=mood_data, x="episode_global", y="avg_mood",
+            hue="agent_type", hue_order=hue_order, palette=palette,
+            linewidth=2.5, ax=ax, errorbar=None,
         )
-        ax.set_ylabel("Mood")
-    ax.grid(True, alpha=0.3)
+        ax.axvline(transfer_ep, color="#6b7280", linestyle="--", linewidth=1.8, label="Phase transition")
+        ax.axhline(0, color="black", linestyle=":", alpha=0.55)
+        ax.axhline(1, color="#9ca3af", linestyle=":", alpha=0.45)
+        ax.axhline(-1, color="#9ca3af", linestyle=":", alpha=0.45)
+        ax.set_ylim(-1.15, 1.15)
+        ax.set_ylabel("Average Mood")
+        ax.set_title("Average Mood (clipped to [-1, 1] during training)")
+        ax.legend(loc="upper right", frameon=True, fontsize=9)
 
-    axes[-1].set_xlabel("Episode (phase 2 continues after transfer)")
-    axes[0].text(
-        n1 * 0.5, -0.18, f"Phase 1: {source}",
-        ha="center", va="top", fontsize=10, color="#1e40af",
-        transform=axes[0].get_xaxis_transform(),
-    )
-    axes[0].text(
-        (n1 + n_total) * 0.5 / max(n_total, 1), -0.18, f"Phase 2: {target}",
-        ha="center", va="top", fontsize=10, color="#9a3412",
-        transform=axes[0].get_xaxis_transform(),
+    axes[-1].set_xlabel("Global Episode Number")
+    axes[0].annotate(
+        f"Phase 1: {source}",
+        xy=(transfer_ep * 0.5, 0.97), xycoords=("data", "axes fraction"),
+        ha="center", fontsize=10, color="#1d4ed8", fontweight="medium",
     )
     axes[0].annotate(
-        "transfer",
-        xy=(transfer_ep, 1.0), xycoords=("data", "axes fraction"),
-        xytext=(6, -6), textcoords="offset points",
-        fontsize=9, color="#374151", rotation=90, va="top",
+        f"Phase 2: {target}",
+        xy=(transfer_ep + (n_total - transfer_ep) * 0.5, 0.97),
+        xycoords=("data", "axes fraction"),
+        ha="center", fontsize=10, color="#c2410c", fontweight="medium",
     )
 
-    # Summary annotation
-    summary = (
-        f"Phase 1 ({n1} ep): reward {df1['total_reward'].mean():.2f}, "
-        f"steps {df1['steps'].mean():.1f}  |  "
-        f"Phase 2 ({n2} ep): reward {df2['total_reward'].mean():.2f}, "
-        f"steps {df2['steps'].mean():.1f}"
-    )
-    if has_mood:
-        summary += (
-            f"  |  mood {df1['mean_overall_mood'].mean():.3f} → "
-            f"{df2['mean_overall_mood'].mean():.3f}"
+    # Summary footer
+    e_only = all_data[all_data["agent_type"] == "Emotional"]
+    if not e_only.empty:
+        p1 = e_only[e_only["phase"] == "Phase 1"]
+        p2 = e_only[e_only["phase"] == "Phase 2"]
+        summary = (
+            f"Emotional — Phase 1: reward {p1['total_reward'].mean():.2f}, "
+            f"steps {p1['steps'].mean():.1f}  |  "
+            f"Phase 2: reward {p2['total_reward'].mean():.2f}, "
+            f"steps {p2['steps'].mean():.1f}"
         )
-    fig.text(0.5, 0.01, summary, ha="center", fontsize=9, color="#374151")
+        if has_mood:
+            summary += (
+                f"  |  mood {p1['mean_overall_mood'].mean():.3f} → "
+                f"{p2['mean_overall_mood'].mean():.3f}"
+            )
+        if baseline_dir:
+            b_only = all_data[all_data["agent_type"] == "Baseline"]
+            bp1 = b_only[b_only["phase"] == "Phase 1"]
+            bp2 = b_only[b_only["phase"] == "Phase 2"]
+            summary += (
+                f"\nBaseline — Phase 1: reward {bp1['total_reward'].mean():.2f}, "
+                f"steps {bp1['steps'].mean():.1f}  |  "
+                f"Phase 2: reward {bp2['total_reward'].mean():.2f}, "
+                f"steps {bp2['steps'].mean():.1f}"
+            )
+        fig.text(0.5, 0.01, summary, ha="center", fontsize=9, color="#374151")
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    plt.tight_layout(rect=[0, 0.04, 1, 0.95])
 
     if save_path is None:
-        save_path = Path(experiment_dir) / "transfer_training.png"
+        suffix = "_comparison" if baseline_dir else ""
+        save_path = Path(experiment_dir) / f"transfer_training{suffix}.png"
     else:
         save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)

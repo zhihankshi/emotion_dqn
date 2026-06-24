@@ -10,7 +10,9 @@ from .visualization import (
     plot_comparison_summary,
     generate_all_plots,
     find_transfer_experiments,
+    find_latest_transfer,
     load_transfer_experiment,
+    build_transfer_long_dataframe,
     plot_transfer_training,
 )
 
@@ -28,6 +30,8 @@ __all__ = [
     'plot_comparison_summary',
     'generate_all_plots',
     'find_transfer_experiments',
+    'find_latest_transfer',
     'load_transfer_experiment',
+    'build_transfer_long_dataframe',
     'plot_transfer_training',
 ]
