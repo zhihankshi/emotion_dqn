@@ -5,7 +5,7 @@ Gymnasium-compatible environment with pixel observations.
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, Sequence
 
 from .maze_loader import load_maze
 from .renderer import MazeRenderer
@@ -257,6 +257,68 @@ class VisualMazeEnv(gym.Env):
         if self.has_door and not self.door_open:
             return False
         return True
+
+    def is_action_valid(
+        self,
+        action: int,
+        agent_pos: Optional[Sequence[int]] = None,
+        has_key: Optional[bool] = None,
+        door_open: Optional[bool] = None,
+    ) -> bool:
+        """Whether an action moves the agent (not wall, boundary, or blocked door)."""
+        pos = list(agent_pos if agent_pos is not None else self.agent_pos)
+        hk = has_key if has_key is not None else self.has_key
+
+        dr, dc = self.ACTIONS[action]
+        new_row = pos[0] + dr
+        new_col = pos[1] + dc
+        new_pos = (new_row, new_col)
+
+        if not (0 <= new_row < self.rows and 0 <= new_col < self.cols):
+            return False
+        if new_pos in self.wall_set:
+            return False
+        if self.has_door and new_pos == self.door_pos and not hk:
+            return False
+        return True
+
+    def get_valid_actions(
+        self,
+        agent_pos: Optional[Sequence[int]] = None,
+        has_key: Optional[bool] = None,
+        door_open: Optional[bool] = None,
+    ) -> List[int]:
+        """Return action indices that do not bump walls or blocked doors."""
+        valid = [
+            action for action in self.ACTIONS
+            if self.is_action_valid(action, agent_pos, has_key, door_open)
+        ]
+        return valid or list(self.ACTIONS.keys())
+
+    def set_state_for_observation(
+        self,
+        agent_pos: Sequence[int],
+        has_key: bool = False,
+        door_open: bool = False,
+        has_shield: bool = False,
+        shield_consumed: bool = False,
+    ) -> np.ndarray:
+        """Place the agent in a specific state and return the rendered observation."""
+        self.agent_pos = list(agent_pos)
+        self.has_key = has_key
+        self.door_open = door_open
+        self.has_shield = has_shield
+        self.shield_consumed = shield_consumed
+        return self._get_observation()
+
+    def iter_walkable_cells(self) -> List[Tuple[int, int]]:
+        """All non-wall grid cells."""
+        return [
+            (row, col)
+            for row in range(self.rows)
+            for col in range(self.cols)
+            if (row, col) not in self.wall_set
+        ]
 
     def _get_observation(self) -> np.ndarray:
         """Render current state to pixel observation (C, H, W)."""

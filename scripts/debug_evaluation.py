@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from environments import VisualMazeEnv
 from agents import DQNAgent, EmotionalDQNAgent
+from agents.dqn import masked_action_selection
 
 
 def debug_episode(agent_path: str, agent_type: str, maze_name: str = 'complex'):
@@ -39,7 +40,8 @@ def debug_episode(agent_path: str, agent_type: str, maze_name: str = 'complex'):
             state_t = torch.from_numpy(obs).unsqueeze(0).to(agent.device)
             q_values = agent.policy_net(state_t).cpu().numpy()[0]
         
-        action = np.argmax(q_values)
+        valid_actions = env.get_valid_actions()
+        action = masked_action_selection(q_values, valid_actions, epsilon=0.0, training=False)
         
         # Get position (if available)
         pos = info.get('agent_pos', info.get('position', 'unknown'))

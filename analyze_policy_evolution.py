@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 from environments import VisualMazeEnv
+from agents.dqn import masked_action_selection
 
 
 def load_agent_checkpoint(
@@ -91,7 +92,8 @@ def run_greedy_episode(agent, env, max_steps=100):
     
     for step in range(max_steps):
         q_values = get_q_values_for_state(agent, obs)
-        action = np.argmax(q_values)
+        valid_actions = env.get_valid_actions()
+        action = masked_action_selection(q_values, valid_actions, epsilon=0.0, training=False)
         action_names = ['UP', 'DOWN', 'LEFT', 'RIGHT']
         
         trajectory.append({

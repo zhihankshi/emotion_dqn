@@ -1,0 +1,35 @@
+{
+  "run_info": {
+    "agent_type": "baseline",
+    "maze_name": "shield_trap",
+    "run_id": 0,
+    "start_time": "2026-06-24T16:56:09.559527",
+    "end_time": "2026-06-24T16:59:05.654512"
+  },
+  "summary": {
+    "total_episodes": 250,
+    "success_rate": 0.18,
+    "avg_steps": 91.39,
+    "avg_reward": -45.36900000000001,
+    "first_success": 0,
+    "total_successes": 60,
+    "avg_door_attempts_without_key": 0.0
+  },
+  "run_metrics": {
+    "run_id": 0,
+    "agent_type": "baseline",
+    "maze_name": "shield_trap",
+    "total_episodes": 250,
+    "first_success_episode": 0,
+    "total_successes": 60,
+    "final_success_rate": 0.18,
+    "final_avg_steps": 91.39,
+    "final_avg_reward": -45.36900000000001,
+    "episodes_to_50_percent_success": -1,
+    "episodes_to_90_percent_success": -1,
+    "avg_door_attempts_before_first_key": 0.0,
+    "avg_key_found_step": 0.0,
+    "avg_exploration_boosts_per_episode": 0.0,
+    "total_mood_bias_applied": 0.0
+  }
+}

@@ -1,5 +1,5 @@
 name: "shield_trap"
-description: "L-shaped maze: collect shield before trap; small goal bonus but net optimal return is negative"
+description: "L-shaped maze: collect shield before trap; positive goal, step/wall/trap costs"
 
 size: [7, 9]
 
@@ -76,11 +76,11 @@ traps: []
 
 rewards:
   step: -0.1
-  trap_no_shield: -6.0
+  trap_no_shield: -10.0
   trap_with_shield: -1.0
-  goal: 0
+  goal: 10.0
   shield_pickup: 2.0
-  wall_bump: 0
+  wall_bump: -0.5
 
 max_steps: 100
 

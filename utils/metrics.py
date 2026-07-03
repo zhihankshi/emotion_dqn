@@ -25,6 +25,10 @@ class EpisodeMetrics:
     key_found_step: int = -1
     door_attempts_without_key: int = 0
     door_opened_step: int = -1
+    shield_pickup_step: int = -1
+    trap_hit_step: int = -1
+    path_type: str = ""
+    wall_bumps: int = 0
     
     # Learning metrics
     mean_loss: float = 0.0
@@ -125,6 +129,7 @@ class MetricsLogger:
         headers = [
             'episode', 'steps', 'total_reward', 'success',
             'key_found_step', 'door_attempts_without_key', 'door_opened_step',
+            'shield_pickup_step', 'trap_hit_step', 'path_type', 'wall_bumps',
             'mean_loss', 'mean_td_error', 'mean_q_value',
             'mean_mood_value', 'mean_mood_action', 'mean_overall_mood',
             'exploration_boosts', 'mean_mood_bias',
@@ -163,6 +168,10 @@ class MetricsLogger:
                 metrics.key_found_step,
                 metrics.door_attempts_without_key,
                 metrics.door_opened_step,
+                metrics.shield_pickup_step,
+                metrics.trap_hit_step,
+                metrics.path_type,
+                metrics.wall_bumps,
                 f"{metrics.mean_loss:.6f}",
                 f"{metrics.mean_td_error:.6f}",
                 f"{metrics.mean_q_value:.6f}",
@@ -251,6 +260,20 @@ class MetricsLogger:
         key_found_steps = [e.key_found_step for e in recent if e.key_found_step > 0]
         if key_found_steps:
             summary['avg_key_found_step'] = np.mean(key_found_steps)
+        
+        # Path diagnostics
+        path_types = [e.path_type for e in recent if e.path_type]
+        if path_types:
+            from collections import Counter
+            summary['path_type_counts'] = dict(Counter(path_types))
+        
+        shield_steps = [e.shield_pickup_step for e in recent if e.shield_pickup_step > 0]
+        if shield_steps:
+            summary['avg_shield_pickup_step'] = np.mean(shield_steps)
+
+        trap_steps = [e.trap_hit_step for e in recent if e.trap_hit_step > 0]
+        if trap_steps:
+            summary['avg_trap_hit_step'] = np.mean(trap_steps)
         
         door_attempts = [e.door_attempts_without_key for e in recent]
         summary['avg_door_attempts_without_key'] = np.mean(door_attempts)
@@ -344,6 +367,8 @@ class MetricsLogger:
         print(f"  Avg reward: {summary.get('avg_reward', 0):.2f}")
         print(f"  First success: episode {summary.get('first_success', -1)}")
         print(f"  Total successes: {summary.get('total_successes', 0)}")
+        if 'path_type_counts' in summary:
+            print(f"  Path types (last {every}): {summary['path_type_counts']}")
         
         if self.agent_type == 'emotional':
             print(f"  Avg mood: {summary.get('avg_mood', 0):.4f}")

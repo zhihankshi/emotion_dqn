@@ -12,10 +12,30 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Sequence
 from pathlib import Path
 
 from .replay_buffer import ReplayBuffer
+
+
+def masked_action_selection(
+    q_values: np.ndarray,
+    valid_actions: Sequence[int],
+    epsilon: float = 0.0,
+    training: bool = True,
+) -> int:
+    """Epsilon-greedy action selection restricted to valid actions."""
+    valid_actions = list(valid_actions)
+    if not valid_actions:
+        valid_actions = list(range(len(q_values)))
+
+    if training and np.random.random() < epsilon:
+        return int(np.random.choice(valid_actions))
+
+    masked = np.full(len(q_values), -np.inf)
+    for action in valid_actions:
+        masked[action] = q_values[action]
+    return int(np.argmax(masked))
 
 
 class DQNNetwork(nn.Module):
@@ -181,24 +201,35 @@ class DQNAgent:
         self.epsilon = self.epsilon_start - (self.epsilon_start - self.epsilon_end) * progress
         self.epsilon = max(self.epsilon_end, self.epsilon)
     
-    def select_action(self, state: np.ndarray, training: bool = True) -> int:
+    def select_action(
+        self,
+        state: np.ndarray,
+        training: bool = True,
+        valid_actions: Optional[Sequence[int]] = None,
+    ) -> int:
         """
         Select action using epsilon-greedy policy.
-        
+
         Args:
             state: Current observation
             training: Whether in training mode (enables exploration)
-        
+            valid_actions: Optional list of legal actions (e.g. excludes walls)
+
         Returns:
             Selected action
         """
+        if valid_actions is None:
+            valid_actions = list(range(self.n_actions))
+
         if training and np.random.random() < self.epsilon:
-            return np.random.randint(self.n_actions)
-        
+            return int(np.random.choice(valid_actions))
+
         with torch.no_grad():
             state_t = torch.from_numpy(state).unsqueeze(0).to(self.device)
-            q_values = self.policy_net(state_t)
-            return q_values.argmax(dim=1).item()
+            q_values = self.policy_net(state_t).cpu().numpy()[0]
+            return masked_action_selection(
+                q_values, valid_actions, epsilon=0.0, training=False
+            )
     
     def store_transition(
         self,

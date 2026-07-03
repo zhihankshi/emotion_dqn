@@ -114,6 +114,29 @@ def analyze_run_checkpoints(
         print(f"  Saved analysis to {csv_path}")
         print(f"  Saved plot to {plot_path}")
 
+        # Q-value policy map from final checkpoint
+        from environments import VisualMazeEnv
+        from analyze_policy_evolution import load_agent_checkpoint
+        from utils.policy_map import plot_policy_map_panels
+
+        checkpoints = list(Path(checkpoint_dir).glob("agent_episode_*.pt"))
+        if checkpoints:
+            final_ckpt = sorted(
+                checkpoints,
+                key=lambda p: int(p.stem.split("_episode_")[-1]),
+            )[-1]
+            env = VisualMazeEnv(maze_name=maze_name, image_size=image_size)
+            agent = load_agent_checkpoint(
+                str(final_ckpt),
+                env,
+                agent_type=agent_type,
+                network_size=network_size,
+                image_size=image_size,
+            )
+            map_path = output_dir / f"{agent_type}_run{run_id}_policy_map.png"
+            plot_policy_map_panels(agent, env, save_path=str(map_path))
+            print(f"  Saved policy map to {map_path}")
+
 
 def run_comparison(
     maze_name: str = "minimal",

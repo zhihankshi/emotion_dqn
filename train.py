@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, Set
 from environments import VisualMazeEnv
 from agents import DQNAgent, EmotionalDQNAgent, DQNNetwork, SmallDQNNetwork
 from utils import EpisodeMetrics, MetricsLogger
+from utils.path_analysis import classify_episode_path
 
 # Extra analysis checkpoints (1-based episode numbers)
 ANALYSIS_CHECKPOINT_EPISODES = {60, 80, 100, 150, 200, 250, 300, 400, 500}
@@ -102,11 +103,17 @@ def train_episode(
     moods = []
     
     done = False
+    prev_pos = tuple(info.get("agent_pos", ()))
     
     while not done:
-        action = agent.select_action(obs, training=training)
+        valid_actions = env.get_valid_actions()
+        action = agent.select_action(obs, training=training, valid_actions=valid_actions)
         next_obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
+
+        if tuple(info.get("agent_pos", ())) == prev_pos and env.rewards.get("wall_bump", 0) != 0:
+            metrics.wall_bumps += 1
+        prev_pos = tuple(info.get("agent_pos", ()))
         
         metrics.total_reward += reward
         metrics.steps += 1
@@ -117,6 +124,12 @@ def train_episode(
         
         if info['door_open'] and metrics.door_opened_step == -1:
             metrics.door_opened_step = metrics.steps
+
+        if info.get('shield_pickup_step', -1) > 0 and metrics.shield_pickup_step == -1:
+            metrics.shield_pickup_step = info['shield_pickup_step']
+
+        if info.get('trap_hit_step', -1) > 0 and metrics.trap_hit_step == -1:
+            metrics.trap_hit_step = info['trap_hit_step']
         
         metrics.door_attempts_without_key = info.get('door_attempts_without_key', 0)
         
@@ -137,6 +150,7 @@ def train_episode(
     
     # Record success (terminated = reached goal/exit, truncated = timeout)
     metrics.success = terminated
+    metrics.path_type = classify_episode_path(env, info, metrics.success)
     
     # Average metrics
     if losses:

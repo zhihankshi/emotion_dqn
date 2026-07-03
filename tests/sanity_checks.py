@@ -405,10 +405,43 @@ def test_layout_parity():
     return True
 
 
-def test_key_approach_positive_only():
-    """Key approach maze provides only non-negative rewards."""
+def test_action_masking():
+    """Valid actions exclude walls and blocked doors."""
     print("\n" + "="*50)
-    print("TEST: Key Approach Positive-Only Rewards")
+    print("TEST: Action Masking")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="minimal")
+    env.reset()
+
+    # Start [0,0]: up and left are walls
+    valid = env.get_valid_actions()
+    assert 0 not in valid, "UP into boundary should be invalid"
+    assert 2 not in valid, "LEFT into boundary should be invalid"
+    assert 1 in valid and 3 in valid, f"DOWN/RIGHT should be valid, got {valid}"
+
+    # Door blocks without key
+    env = VisualMazeEnv(maze_name="key_approach")
+    env.reset()
+    for _ in range(4):
+        env.step(3)
+    valid = env.get_valid_actions()
+    assert 3 not in valid, "RIGHT into closed door without key should be invalid"
+
+    env.has_key = True
+    valid = env.get_valid_actions()
+    assert 3 in valid, "RIGHT into door should be valid with key"
+
+    print(f"  minimal start valid: {[1, 3]}")
+    print(f"  key_approach at door with key valid: {valid}")
+    print("✓ Action masking works!")
+    return True
+
+
+def test_key_approach_rewards():
+    """Key approach maze uses dense shaping with positive optimal return."""
+    print("\n" + "="*50)
+    print("TEST: Key Approach Rewards")
     print("="*50)
 
     env = VisualMazeEnv(maze_name="key_approach")
@@ -422,37 +455,37 @@ def test_key_approach_positive_only():
     for action in optimal_actions:
         _, reward, terminated, truncated, info = env.step(action)
         rewards.append(reward)
-        assert reward >= 0, f"Negative reward on optimal path: {reward}"
         if terminated or truncated:
             break
 
     assert terminated, "Optimal path should reach goal"
-    assert any(r > 0 for r in rewards), "Expected at least one positive reward"
-    assert sum(rewards) == 13.0, f"Optimal total should be 13.0, got {sum(rewards)}"
+    assert sum(rewards) > 0, f"Optimal total should be positive, got {sum(rewards)}"
+    assert abs(sum(rewards) - 12.44) < 1e-6, f"Expected optimal total 12.44, got {sum(rewards)}"
 
-    # Wall bump and door-block should be zero, not negative
+    # Wall bump and door-block should be negative (dense shaping)
     env.reset()
     _, reward, _, _, _ = env.step(2)  # left into wall at [1,0]
-    assert reward == 0, f"Wall bump should be 0, got {reward}"
+    assert reward < 0, f"Wall bump should be negative, got {reward}"
+    assert abs(reward - (-0.14)) < 1e-6, f"Expected wall bump -0.14, got {reward}"
 
     env.reset()
     for _ in range(4):
         env.step(3)  # move to door without key
     _, reward, term, _, info = env.step(3)
-    assert reward == 0, f"Door without key should be 0, got {reward}"
+    assert reward < 0, f"Door without key should be negative, got {reward}"
     assert not term, "Should not complete episode without key"
     assert not info["door_open"], "Door should remain closed without key"
 
     print(f"  Optimal path rewards: {rewards}")
     print(f"  Optimal total: {sum(rewards)}")
-    print("✓ Key approach rewards are positive-only!")
+    print("✓ Key approach rewards configured correctly!")
     return True
 
 
-def test_shield_avoidance_negative_only():
-    """Shield avoidance maze provides only non-positive rewards."""
+def test_shield_avoidance_rewards():
+    """Shield avoidance maze uses dense penalties; optimal path stays negative."""
     print("\n" + "="*50)
-    print("TEST: Shield Avoidance Negative-Only Rewards")
+    print("TEST: Shield Avoidance Rewards")
     print("="*50)
 
     env = VisualMazeEnv(maze_name="shield_avoidance")
@@ -468,7 +501,6 @@ def test_shield_avoidance_negative_only():
     for action in optimal_actions:
         _, reward, terminated, truncated, info = env.step(action)
         rewards.append(reward)
-        assert reward <= 0, f"Positive reward on optimal path: {reward}"
         if info.get("trap_hit_step", -1) == env.steps:
             trap_reward = reward
         if terminated:
@@ -477,11 +509,13 @@ def test_shield_avoidance_negative_only():
             break
 
     assert terminated, "Optimal path should reach goal"
-    assert trap_reward == -5.0, f"Trap with shield should be -5.0, got {trap_reward}"
-    assert goal_reward == 0, f"Goal should give 0 reward, got {goal_reward}"
-    assert sum(rewards) == -5.0, f"Optimal total should be -5.0, got {sum(rewards)}"
+    assert trap_reward is not None
+    assert trap_reward < 0, f"Trap with shield should be negative, got {trap_reward}"
+    assert goal_reward is not None and goal_reward > 0, f"Goal should be positive, got {goal_reward}"
+    assert sum(rewards) < 0, f"Optimal total should be negative, got {sum(rewards)}"
+    assert abs(sum(rewards) - (-4.56)) < 1e-6, f"Expected optimal total -4.56, got {sum(rewards)}"
 
-    # Trap without shield should be strictly negative
+    # Trap without shield should be much worse than optimal shield route
     env.reset()
     trap_hit_reward = None
     for _ in range(4):
@@ -491,18 +525,18 @@ def test_shield_avoidance_negative_only():
             break
 
     assert trap_hit_reward is not None, "Should have stepped on trap"
-    assert trap_hit_reward < 0, f"Trap without shield should be negative, got {trap_hit_reward}"
-    assert trap_hit_reward == -30.0, f"Expected -30.0 trap damage, got {trap_hit_reward}"
+    assert trap_hit_reward < -20, f"Trap without shield should be large penalty, got {trap_hit_reward}"
+    assert trap_hit_reward == -30.04, f"Expected -30.04 trap damage, got {trap_hit_reward}"
 
     print(f"  Optimal path rewards: {rewards}")
     print(f"  Optimal total: {sum(rewards)}")
     print(f"  Trap without shield: {trap_hit_reward}")
-    print("✓ Shield avoidance rewards are negative-only!")
+    print("✓ Shield avoidance rewards configured correctly!")
     return True
 
 
 def test_shield_trap_rewards():
-    """Shield trap: step penalty, shield route optimal, net return <= 0."""
+    """Shield trap: shield route beats trap rush; goal reward is positive."""
     print("\n" + "="*50)
     print("TEST: Shield Trap Rewards")
     print("="*50)
@@ -523,8 +557,9 @@ def test_shield_trap_rewards():
             break
 
     assert terminated, "Shield path should reach goal"
-    assert shield_total <= 0, f"Optimal shield path should be <= 0, got {shield_total}"
-    assert abs(shield_total - (-0.4)) < 1e-6, f"Expected shield path total -0.4, got {shield_total}"
+    assert env.rewards["goal"] > 0, "Goal reward should be positive"
+    assert env.rewards["wall_bump"] < 0, "Wall bump should be negative"
+    assert abs(shield_total - 9.6) < 1e-6, f"Expected shield path total 9.6, got {shield_total}"
     assert env.rewards["shield_pickup"] > 0, "Shield pickup should be positive"
     assert env.rewards["step"] < 0, "Step penalty should be negative"
 
@@ -539,7 +574,7 @@ def test_shield_trap_rewards():
     assert direct_total < shield_total, (
         f"Direct trap rush ({direct_total}) should be worse than shield path ({shield_total})"
     )
-    assert abs(direct_total - (-6.6)) < 1e-6, f"Expected direct path total -6.6, got {direct_total}"
+    assert abs(direct_total - (-0.6)) < 1e-6, f"Expected direct path total -0.6, got {direct_total}"
 
     print(f"  Shield path total: {shield_total}")
     print(f"  Direct path total: {direct_total}")
@@ -568,8 +603,7 @@ def test_shield_trap_v2_rewards():
 
     assert terminated
     direct_total = sum(direct_rewards)
-    assert direct_total <= 0, f"Direct path should be <= 0, got {direct_total}"
-    assert abs(direct_total - (-6.6)) < 1e-6
+    assert abs(direct_total - (-0.6)) < 1e-6
 
     # Worse path: collect misleading shield first (v1 habit)
     env.reset()
@@ -585,9 +619,9 @@ def test_shield_trap_v2_rewards():
     assert shield_total < direct_total, (
         "Shield path should be worse than skipping shield"
     )
-    assert abs(shield_total - (-13.4)) < 1e-6
+    assert abs(shield_total - (-5.4)) < 1e-6
 
-    # Gap should mirror shield_trap v1 (shield good vs skip shield)
+    # v1 rewards shield-first; v2 penalizes the v1 habit
     v1_env = VisualMazeEnv(maze_name="shield_trap")
     v1_env.reset()
     v1_shield_total = 0.0
@@ -605,9 +639,8 @@ def test_shield_trap_v2_rewards():
             break
     v1_gap = v1_shield_total - v1_direct_total
     v2_gap = shield_total - direct_total
-    assert abs(abs(v1_gap) - abs(v2_gap)) < 1.5, (
-        f"v2 penalty gap ({v2_gap:.2f}) should mirror v1 benefit gap ({v1_gap:.2f})"
-    )
+    assert v1_gap > 5.0, f"v1 should strongly favor shield route (gap={v1_gap:.2f})"
+    assert v2_gap < -2.0, f"v2 should penalize shield habit (gap={v2_gap:.2f})"
 
     assert env.rewards["shield_pickup"] < 0
     assert env.rewards["trap_with_shield"] < env.rewards["trap_no_shield"]
@@ -639,8 +672,9 @@ def run_all_tests():
         test_observation_changes,
         test_reproducibility,
         test_layout_parity,
-        test_key_approach_positive_only,
-        test_shield_avoidance_negative_only,
+        test_action_masking,
+        test_key_approach_rewards,
+        test_shield_avoidance_rewards,
         test_shield_trap_rewards,
         test_shield_trap_v2_rewards,
     ]
