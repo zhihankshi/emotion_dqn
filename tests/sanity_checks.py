@@ -536,7 +536,7 @@ def test_shield_avoidance_rewards():
 
 
 def test_shield_trap_rewards():
-    """Shield trap: negative-only; shield route is least-bad path."""
+    """Shield trap: balanced rewards; shield route is best, trap rush and timeout are bad."""
     print("\n" + "="*50)
     print("TEST: Shield Trap Rewards")
     print("="*50)
@@ -557,11 +557,11 @@ def test_shield_trap_rewards():
             break
 
     assert terminated, "Shield path should reach goal"
-    assert env.rewards["goal"] == 0, f"Goal reward should be 0, got {env.rewards['goal']}"
-    assert env.rewards["shield_pickup"] == 0, f"Shield pickup should be 0, got {env.rewards['shield_pickup']}"
+    assert env.rewards["goal"] > 0, f"Goal reward should be positive, got {env.rewards['goal']}"
+    assert env.rewards["shield_pickup"] > 0, f"Shield pickup should be positive, got {env.rewards['shield_pickup']}"
     assert env.rewards["wall_bump"] < 0, "Wall bump should be negative"
     assert env.rewards["step"] < 0, "Step penalty should be negative"
-    assert abs(shield_total - (-3.4)) < 1e-6, f"Expected shield path total -3.4, got {shield_total}"
+    assert abs(shield_total - 4.6) < 1e-6, f"Expected shield path total 4.6, got {shield_total}"
 
     env.reset()
     for action in direct_actions:
@@ -574,8 +574,8 @@ def test_shield_trap_rewards():
     assert direct_total < shield_total, (
         f"Direct trap rush ({direct_total}) should be worse than shield path ({shield_total})"
     )
-    assert abs(direct_total - (-50.6)) < 1e-6, f"Expected direct path total -50.6, got {direct_total}"
-    assert direct_total < -10.0, "Trap rush should be worse than timeout (-10)"
+    assert abs(direct_total - (-15.6)) < 1e-6, f"Expected direct path total -15.6, got {direct_total}"
+    assert direct_total < 0, "Trap rush should be net negative"
 
     print(f"  Shield path total: {shield_total}")
     print(f"  Direct path total: {direct_total}")
@@ -641,7 +641,7 @@ def test_shield_trap_v2_rewards():
             break
     v1_gap = v1_shield_total - v1_direct_total
     v2_gap = shield_total - direct_total
-    assert v1_gap > 5.0, f"v1 should strongly favor shield route (gap={v1_gap:.2f})"
+    assert v1_gap > 15.0, f"v1 should strongly favor shield route (gap={v1_gap:.2f})"
     assert v2_gap < -2.0, f"v2 should penalize shield habit (gap={v2_gap:.2f})"
 
     assert env.rewards["shield_pickup"] < 0

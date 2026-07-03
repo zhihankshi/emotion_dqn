@@ -77,7 +77,17 @@ class MazeRenderer:
             for col in range(self.cols):
                 self._draw_cell(img, row, col, agent_pos, has_key, door_open,
                                 has_shield, shield_consumed)
-        
+
+        # Shield-held indicator: bright cyan border so the CNN can
+        # easily distinguish "have shield" from "don't have shield"
+        if has_shield:
+            border = max(1, self.cell_size // 3)
+            shield_color = self.colors.get('shield', np.array([0, 255, 255], dtype=np.uint8))
+            img[:border, :] = shield_color
+            img[-border:, :] = shield_color
+            img[:, :border] = shield_color
+            img[:, -border:] = shield_color
+
         return img
     
     def _draw_cell(
