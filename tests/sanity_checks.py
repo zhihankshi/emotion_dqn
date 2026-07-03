@@ -536,7 +536,7 @@ def test_shield_avoidance_rewards():
 
 
 def test_shield_trap_rewards():
-    """Shield trap: shield route beats trap rush; goal reward is positive."""
+    """Shield trap: negative-only; shield route is least-bad path."""
     print("\n" + "="*50)
     print("TEST: Shield Trap Rewards")
     print("="*50)
@@ -557,11 +557,11 @@ def test_shield_trap_rewards():
             break
 
     assert terminated, "Shield path should reach goal"
-    assert env.rewards["goal"] > 0, "Goal reward should be positive"
+    assert env.rewards["goal"] == 0, f"Goal reward should be 0, got {env.rewards['goal']}"
+    assert env.rewards["shield_pickup"] == 0, f"Shield pickup should be 0, got {env.rewards['shield_pickup']}"
     assert env.rewards["wall_bump"] < 0, "Wall bump should be negative"
-    assert abs(shield_total - 9.6) < 1e-6, f"Expected shield path total 9.6, got {shield_total}"
-    assert env.rewards["shield_pickup"] > 0, "Shield pickup should be positive"
     assert env.rewards["step"] < 0, "Step penalty should be negative"
+    assert abs(shield_total - (-3.4)) < 1e-6, f"Expected shield path total -3.4, got {shield_total}"
 
     env.reset()
     for action in direct_actions:
@@ -574,10 +574,12 @@ def test_shield_trap_rewards():
     assert direct_total < shield_total, (
         f"Direct trap rush ({direct_total}) should be worse than shield path ({shield_total})"
     )
-    assert abs(direct_total - (-0.6)) < 1e-6, f"Expected direct path total -0.6, got {direct_total}"
+    assert abs(direct_total - (-50.6)) < 1e-6, f"Expected direct path total -50.6, got {direct_total}"
+    assert direct_total < -10.0, "Trap rush should be worse than timeout (-10)"
 
     print(f"  Shield path total: {shield_total}")
     print(f"  Direct path total: {direct_total}")
+    print(f"  Gap: {shield_total - direct_total:.1f} points")
     print("✓ Shield trap rewards configured correctly!")
     return True
 

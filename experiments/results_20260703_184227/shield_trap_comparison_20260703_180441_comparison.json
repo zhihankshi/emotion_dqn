@@ -1,0 +1,68 @@
+{
+  "experiment_name": "shield_trap_comparison_20260703_180441",
+  "timestamp": "2026-07-03T18:13:41.095807",
+  "comparison": {
+    "baseline": {
+      "n_runs": 1,
+      "first_success_mean": NaN,
+      "first_success_std": NaN,
+      "final_success_rate_mean": 0.05,
+      "final_success_rate_std": 0.0,
+      "final_avg_steps_mean": 95.32,
+      "final_avg_steps_std": 0.0,
+      "episodes_to_50_mean": 100.0,
+      "episodes_to_90_mean": NaN
+    },
+    "emotional": {
+      "n_runs": 1,
+      "first_success_mean": NaN,
+      "first_success_std": NaN,
+      "final_success_rate_mean": 0.39,
+      "final_success_rate_std": 0.0,
+      "final_avg_steps_mean": 64.06,
+      "final_avg_steps_std": 0.0,
+      "episodes_to_50_mean": 100.0,
+      "episodes_to_90_mean": NaN
+    }
+  },
+  "all_runs": {
+    "baseline": [
+      {
+        "run_id": 0,
+        "agent_type": "baseline",
+        "maze_name": "shield_trap",
+        "total_episodes": 750,
+        "first_success_episode": 0,
+        "total_successes": 184,
+        "final_success_rate": 0.05,
+        "final_avg_steps": 95.32,
+        "final_avg_reward": -7.631999999999989,
+        "episodes_to_50_percent_success": 100,
+        "episodes_to_90_percent_success": -1,
+        "avg_door_attempts_before_first_key": 0.0,
+        "avg_key_found_step": 0.0,
+        "avg_exploration_boosts_per_episode": 0.0,
+        "total_mood_bias_applied": 0.0
+      }
+    ],
+    "emotional": [
+      {
+        "run_id": 0,
+        "agent_type": "emotional",
+        "maze_name": "shield_trap",
+        "total_episodes": 750,
+        "first_success_episode": 0,
+        "total_successes": 190,
+        "final_success_rate": 0.39,
+        "final_avg_steps": 64.06,
+        "final_avg_reward": -5.775999999999994,
+        "episodes_to_50_percent_success": 100,
+        "episodes_to_90_percent_success": -1,
+        "avg_door_attempts_before_first_key": 0.0,
+        "avg_key_found_step": 0.0,
+        "avg_exploration_boosts_per_episode": 0.0,
+        "total_mood_bias_applied": 0.0
+      }
+    ]
+  }
+}

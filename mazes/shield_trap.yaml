@@ -76,13 +76,13 @@ traps: []
 
 rewards:
   step: -0.1
-  trap_no_shield: -10.0
+  trap_no_shield: -50.0
   trap_with_shield: -1.0
-  goal: 10.0
-  shield_pickup: 2.0
+  goal: 5
+  shield_pickup: 5
   wall_bump: -0.5
 
-max_steps: 100
+max_steps: 200
 
 colors:
   agent: [0, 0, 255]
