@@ -27,7 +27,7 @@ def load_agent_checkpoint(
     if agent_type is None and isinstance(checkpoint, dict):
         agent_type = checkpoint.get("agent_type", "baseline")
 
-    if network_size == 'small' or image_size <= 7:
+    if network_size == 'small' or image_size < 36:
         network_class = SmallDQNNetwork
     else:
         network_class = DQNNetwork

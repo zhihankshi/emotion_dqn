@@ -39,8 +39,8 @@ def should_save_checkpoint(
 
 
 def resolve_network_class(network_size: str, image_size: int):
-    """Pick SmallDQNNetwork for 7x7 or explicit --network_size small."""
-    if network_size == "small" or image_size <= 7:
+    """Pick SmallDQNNetwork when the image is too small for DQNNetwork's 8x8 kernel."""
+    if network_size == "small" or image_size < 36:
         return SmallDQNNetwork
     return None
 
@@ -248,7 +248,7 @@ def train(
             f"linearly over {n_episodes} episodes"
         )
     
-    if network_class is None and image_size <= 7:
+    if network_class is None and image_size < 36:
         network_class = SmallDQNNetwork
         if verbose:
             print(f"  Network: {SmallDQNNetwork.__name__} (auto for image_size={image_size})")
