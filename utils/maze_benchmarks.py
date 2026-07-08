@@ -13,6 +13,8 @@ OPTIMAL_ACTIONS: Dict[str, List[int]] = {
     "shield_avoidance": [1] * 4 + [0] * 4 + [3] * 6,
     "shield_trap": [1] * 4 + [0] * 4 + [3] * 6,
     "shield_trap_v2": [3] * 6,
+    # down to shield, up, then right through trap to goal
+    "shield_trap_easy": [1, 0, 3, 3, 3, 3],
 }
 
 

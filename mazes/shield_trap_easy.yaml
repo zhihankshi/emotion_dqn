@@ -1,0 +1,61 @@
+name: "shield_trap_easy"
+description: "Curriculum maze: shield one cell below start; short corridor; looping worse than shield route"
+
+size: [4, 7]
+
+agent_start: [1, 1]
+goal_position: [1, 5]
+door_position: null
+key_required: false
+
+shield_position: [2, 1]
+trap_position: [1, 3]
+
+walls:
+  # Row 0 (top border)
+  - [0, 0]
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+  - [0, 5]
+  - [0, 6]
+  # Row 1 (left/right border)
+  - [1, 0]
+  - [1, 6]
+  # Row 2 (shield alcove + lower walls)
+  - [2, 0]
+  - [2, 2]
+  - [2, 3]
+  - [2, 4]
+  - [2, 5]
+  - [2, 6]
+  # Row 3 (bottom border)
+  - [3, 0]
+  - [3, 1]
+  - [3, 2]
+  - [3, 3]
+  - [3, 4]
+  - [3, 5]
+  - [3, 6]
+
+traps: []
+
+rewards:
+  step: -0.5
+  trap_no_shield: -20.0
+  trap_with_shield: -1.0
+  goal: 15
+  shield_pickup: 5
+  wall_bump: -0.5
+  timeout: -50.0
+
+max_steps: 100
+
+colors:
+  agent: [0, 0, 255]
+  shield: [0, 255, 255]
+  goal: [0, 255, 0]
+  wall: [64, 64, 64]
+  trap: [255, 0, 0]
+  floor: [240, 240, 240]

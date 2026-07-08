@@ -666,6 +666,67 @@ def test_shield_trap_v2_rewards():
     return True
 
 
+def test_shield_trap_easy_rewards():
+    """Easy curriculum maze: looping < trap rush < shield route."""
+    print("\n" + "="*50)
+    print("TEST: Shield Trap Easy Rewards")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="shield_trap_easy")
+    env.reset()
+
+    shield_actions = [1, 0, 3, 3, 3, 3]
+    direct_actions = [3, 3, 3, 3]
+
+    shield_total = 0.0
+    for action in shield_actions:
+        _, reward, terminated, truncated, _ = env.step(action)
+        shield_total += reward
+        if terminated or truncated:
+            break
+    assert terminated, "Shield path should reach goal"
+    assert abs(shield_total - 12.0) < 1e-6, f"Expected shield path 12.0, got {shield_total}"
+
+    env.reset()
+    direct_total = 0.0
+    for action in direct_actions:
+        _, reward, terminated, truncated, _ = env.step(action)
+        direct_total += reward
+        if terminated or truncated:
+            break
+    assert terminated, "Direct path should still reach goal"
+    assert abs(direct_total - (-27.0)) < 1e-6, f"Expected direct path -27.0, got {direct_total}"
+    assert direct_total < shield_total
+
+    # Forced timeout / loop should be worse than both successful paths
+    env.reset()
+    loop_total = 0.0
+    # oscillate left/right in the safe corridor in front of the trap
+    for i in range(env.max_steps):
+        action = 3 if i % 2 == 0 else 2
+        # start at [1,1]; right then left keeps agent near start without goal
+        if i == 0:
+            action = 3  # move to [1,2]
+        elif i % 2 == 1:
+            action = 2  # back to [1,1]
+        else:
+            action = 3  # to [1,2]
+        _, reward, terminated, truncated, _ = env.step(action)
+        loop_total += reward
+        if terminated or truncated:
+            break
+    assert truncated and not terminated
+    assert loop_total < direct_total < shield_total, (
+        f"Expected loop ({loop_total}) < trap_rush ({direct_total}) < shield ({shield_total})"
+    )
+
+    print(f"  Shield path total: {shield_total}")
+    print(f"  Direct path total: {direct_total}")
+    print(f"  Loop/timeout total: {loop_total}")
+    print("✓ Shield trap easy rewards configured correctly!")
+    return True
+
+
 def run_all_tests():
     """Run all sanity checks."""
     print("\n" + "="*60)
@@ -690,6 +751,7 @@ def run_all_tests():
         test_shield_avoidance_rewards,
         test_shield_trap_rewards,
         test_shield_trap_v2_rewards,
+        test_shield_trap_easy_rewards,
     ]
     
     passed = 0
