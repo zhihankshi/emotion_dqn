@@ -742,6 +742,47 @@ def test_shield_trap_easy_rewards():
     return True
 
 
+def test_shield_trap_terminal_rewards():
+    """Terminal-trap variant: reaching trap ends episode; shield route should dominate."""
+    print("\n" + "="*50)
+    print("TEST: Shield Trap Terminal Rewards")
+    print("="*50)
+
+    env = VisualMazeEnv(maze_name="shield_trap_terminal")
+    env.reset()
+
+    # down to shield, back up, then right to terminal trap/goal
+    shield_actions = [1] * 4 + [0] * 4 + [3] * 4
+    direct_actions = [3] * 4
+
+    shield_total = 0.0
+    terminated = False
+    truncated = False
+    for action in shield_actions:
+        _, reward, terminated, truncated, _ = env.step(action)
+        shield_total += reward
+        if terminated or truncated:
+            break
+    assert terminated and not truncated
+    assert abs(shield_total - 9.0) < 1e-6, f"Expected shield path 9.0, got {shield_total}"
+
+    env.reset()
+    direct_total = 0.0
+    for action in direct_actions:
+        _, reward, terminated, truncated, _ = env.step(action)
+        direct_total += reward
+        if terminated or truncated:
+            break
+    assert terminated and not truncated
+    assert abs(direct_total - (-52.0)) < 1e-6, f"Expected direct path -52.0, got {direct_total}"
+
+    assert direct_total < shield_total
+    print(f"  Shield path total: {shield_total}")
+    print(f"  Direct path total: {direct_total}")
+    print("✓ Shield trap terminal rewards configured correctly!")
+    return True
+
+
 def run_all_tests():
     """Run all sanity checks."""
     print("\n" + "="*60)
@@ -767,6 +808,7 @@ def run_all_tests():
         test_shield_trap_rewards,
         test_shield_trap_v2_rewards,
         test_shield_trap_easy_rewards,
+        test_shield_trap_terminal_rewards,
     ]
     
     passed = 0
