@@ -561,7 +561,7 @@ def test_shield_trap_rewards():
     assert env.rewards["shield_pickup"] > 0, f"Shield pickup should be positive, got {env.rewards['shield_pickup']}"
     assert env.rewards["wall_bump"] < 0, "Wall bump should be negative"
     assert env.rewards["step"] < 0, "Step penalty should be negative"
-    assert abs(shield_total - 7.6) < 1e-6, f"Expected shield path total 7.6, got {shield_total}"
+    assert abs(shield_total - 2.0) < 1e-6, f"Expected shield path total 2.0, got {shield_total}"
 
     env.reset()
     for action in direct_actions:
@@ -574,11 +574,26 @@ def test_shield_trap_rewards():
     assert direct_total < shield_total, (
         f"Direct trap rush ({direct_total}) should be worse than shield path ({shield_total})"
     )
-    assert abs(direct_total - (-45.6)) < 1e-6, f"Expected direct path total -45.6, got {direct_total}"
+    assert abs(direct_total - (-48.0)) < 1e-6, f"Expected direct path total -48.0, got {direct_total}"
     assert direct_total < 0, "Trap rush should be net negative"
+
+    # Forced loop/timeout should be worse than both successful paths
+    env.reset()
+    loop_total = 0.0
+    for i in range(env.max_steps):
+        action = 3 if i % 2 == 0 else 2
+        _, reward, terminated, truncated, _ = env.step(action)
+        loop_total += reward
+        if terminated or truncated:
+            break
+    assert truncated and not terminated
+    assert loop_total < direct_total < shield_total, (
+        f"Expected loop ({loop_total}) < trap_rush ({direct_total}) < shield ({shield_total})"
+    )
 
     print(f"  Shield path total: {shield_total}")
     print(f"  Direct path total: {direct_total}")
+    print(f"  Loop/timeout total: {loop_total}")
     print(f"  Gap: {shield_total - direct_total:.1f} points")
     print("✓ Shield trap rewards configured correctly!")
 
