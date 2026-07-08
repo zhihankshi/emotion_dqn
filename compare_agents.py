@@ -185,6 +185,7 @@ def run_comparison(
     reward_overrides: Optional[Dict[str, float]] = None,
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
+    show_tqdm: bool = False,
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -283,6 +284,7 @@ def run_comparison(
                 reward_overrides=reward_overrides,
                 max_steps=max_steps,
                 shield_lights_up=shield_lights_up,
+                show_tqdm=show_tqdm,
             )
 
             run_metrics = logger.get_run_metrics()
@@ -364,6 +366,7 @@ def quick_test(
     reward_overrides: Optional[Dict[str, float]] = None,
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
+    show_tqdm: bool = False,
 ) -> None:
     """Quick test to verify both agents work and save checkpoints."""
     print("\n" + "=" * 70)
@@ -409,6 +412,7 @@ def quick_test(
                 reward_overrides=reward_overrides,
                 max_steps=max_steps,
                 shield_lights_up=shield_lights_up,
+                show_tqdm=show_tqdm,
             )
 
             checkpoint_dir = get_run_checkpoint_dir(Path(logger.log_dir))
@@ -473,6 +477,11 @@ def main():
         action="store_true",
         help="Brighten the entire observation when the agent holds the shield",
     )
+    parser.add_argument(
+        "--tqdm",
+        action="store_true",
+        help="Show per-episode tqdm bars (off by default to reduce console clutter)",
+    )
 
     parser.add_argument("--quick_test", action="store_true",
                         help="Run quick test to verify agents work")
@@ -533,7 +542,7 @@ def main():
     if args.quick_test:
         quick_test(
             maze_name=args.maze,
-            n_episodes=100,
+            n_episodes=args.episodes,
             seed=args.seed,
             device=args.device,
             config=config,
@@ -543,6 +552,7 @@ def main():
             reward_overrides=reward_overrides,
             max_steps=args.max_steps,
             shield_lights_up=args.shield_lights_up,
+            show_tqdm=args.tqdm,
         )
     else:
         run_comparison(
@@ -566,6 +576,7 @@ def main():
             reward_overrides=reward_overrides,
             max_steps=args.max_steps,
             shield_lights_up=args.shield_lights_up,
+            show_tqdm=args.tqdm,
         )
 
 

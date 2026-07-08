@@ -210,13 +210,15 @@ class VisualMazeEnv(gym.Env):
         # Check conditional trap (shield/trap mechanic)
         elif self.has_trap_mechanic and new_pos == self.trap_pos:
             self.agent_pos = [new_row, new_col]
-            if self.has_shield:
-                reward += self.rewards['trap_with_shield']
-                self.has_shield = False
-                self.shield_consumed = True
-            else:
-                reward += self.rewards['trap_no_shield']
+            # Trap should only deal damage once per episode; otherwise the
+            # agent can accrue multiple large penalties by dithering on it.
             if self.trap_hit_step == -1:
+                if self.has_shield:
+                    reward += self.rewards['trap_with_shield']
+                    self.has_shield = False
+                    self.shield_consumed = True
+                else:
+                    reward += self.rewards['trap_no_shield']
                 self.trap_hit_step = self.steps
         
         # Check simple traps (flat penalty list)

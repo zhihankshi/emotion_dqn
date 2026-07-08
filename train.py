@@ -193,6 +193,7 @@ def train(
     reward_overrides: Optional[Dict[str, float]] = None,
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
+    show_tqdm: bool = True,
 ) -> MetricsLogger:
     """
     Train an agent on the maze.
@@ -310,9 +311,13 @@ def train(
         print(f"\nStarting training...")
     
     # Training loop
-    pbar = tqdm(range(n_episodes), disable=not verbose)
-    
-    for episode in pbar:
+    episode_iter = range(n_episodes)
+    pbar = None
+    if verbose and show_tqdm:
+        pbar = tqdm(episode_iter, mininterval=2.0, leave=False)
+        episode_iter = pbar
+
+    for episode in episode_iter:
         agent.update_epsilon_for_episode(episode, n_episodes)
 
         # Train one episode
@@ -327,7 +332,7 @@ def train(
             agent.save_checkpoint(str(checkpoint_path), episode=episode_num)
         
         # Update progress bar
-        if episode >= 100:
+        if pbar is not None and episode >= 100:
             success_rate = logger.get_success_rate(100)
             avg_steps = logger.get_avg_steps(100)
             pbar.set_postfix({

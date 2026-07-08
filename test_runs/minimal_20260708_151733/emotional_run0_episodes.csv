@@ -1,0 +1,4 @@
+episode,steps,total_reward,success,key_found_step,door_attempts_without_key,door_opened_step,shield_pickup_step,trap_hit_step,path_type,wall_bumps,mean_loss,mean_td_error,mean_q_value,mean_mood_value,mean_mood_action,mean_overall_mood,exploration_boosts,mean_mood_bias,epsilon,effective_epsilon,success_rate_100
+0,178,5.8800,1,44,0,125,-1,-1,key_route,0,0.016672,0.000465,0.085450,0.000000,0.000000,-0.003177,0,0.000000,1.0000,0.0000,1.0000
+1,158,6.6800,1,134,0,157,-1,-1,key_route,0,0.243330,0.003742,0.106778,0.000000,0.000000,-0.014015,0,0.000000,0.5250,0.0000,1.0000
+2,34,11.6400,1,8,0,33,-1,-1,key_route,0,0.373785,0.007993,0.128938,0.000000,0.000000,0.000259,0,0.000000,0.0500,0.0000,1.0000
