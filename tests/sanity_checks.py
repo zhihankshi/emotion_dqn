@@ -581,6 +581,17 @@ def test_shield_trap_rewards():
     print(f"  Direct path total: {direct_total}")
     print(f"  Gap: {shield_total - direct_total:.1f} points")
     print("✓ Shield trap rewards configured correctly!")
+
+    # Verify timeout penalty is applied on truncation (if configured)
+    timeout_penalty = env.rewards.get("timeout", 0)
+    assert timeout_penalty <= 0, f"Timeout penalty should be <= 0, got {timeout_penalty}"
+
+    env.reset()
+    env.max_steps = 1  # force truncation on first step
+    _, r, term, trunc, _ = env.step(3)  # move right (should not terminate)
+    assert trunc and not term, "Expected truncation without termination"
+    expected = env.rewards["step"] + timeout_penalty
+    assert abs(r - expected) < 1e-6, f"Expected timeout reward {expected}, got {r}"
     return True
 
 

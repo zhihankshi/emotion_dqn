@@ -243,6 +243,8 @@ class VisualMazeEnv(gym.Env):
         
         # Check truncation (timeout)
         truncated = self.steps >= self.max_steps
+        if truncated and not terminated:
+            reward += self.rewards.get('timeout', 0)
         
         # Get observation and info
         obs = self._get_observation()
