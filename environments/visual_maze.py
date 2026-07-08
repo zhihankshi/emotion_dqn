@@ -5,7 +5,7 @@ Gymnasium-compatible environment with pixel observations.
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from typing import Optional, Tuple, Dict, Any, List, Sequence
+from typing import Optional, Tuple, Dict, Any, List, Sequence, Mapping
 
 from .maze_loader import load_maze
 from .renderer import MazeRenderer
@@ -39,7 +39,10 @@ class VisualMazeEnv(gym.Env):
         maze_name: str = "minimal",
         render_mode: str = "rgb_array",
         image_size: int = 64,
-        mazes_dir: Optional[str] = None
+        mazes_dir: Optional[str] = None,
+        reward_overrides: Optional[Mapping[str, float]] = None,
+        max_steps: Optional[int] = None,
+        shield_lights_up: Optional[bool] = None,
     ):
         """
         Initialize the visual maze environment.
@@ -62,7 +65,16 @@ class VisualMazeEnv(gym.Env):
         self.rows, self.cols = self.config['size']
         
         # Create renderer
-        self.renderer = MazeRenderer(self.config, image_size=image_size)
+        renderer_shield_lights_up = (
+            bool(self.config.get("shield_lights_up", False))
+            if shield_lights_up is None
+            else bool(shield_lights_up)
+        )
+        self.renderer = MazeRenderer(
+            self.config,
+            image_size=image_size,
+            shield_lights_up=renderer_shield_lights_up,
+        )
         
         # Precompute sets for fast collision detection
         self.wall_set = set(tuple(w) for w in self.config['walls'])
@@ -89,9 +101,14 @@ class VisualMazeEnv(gym.Env):
         self.has_trap_mechanic = trap_raw is not None
         self.trap_pos = tuple(trap_raw) if self.has_trap_mechanic else None
 
-        # Rewards
-        self.rewards = self.config['rewards']
-        self.max_steps = self.config.get('max_steps', 200)
+        # Rewards (allow runtime overrides for quick reward-shaping sweeps)
+        self.rewards = dict(self.config['rewards'])
+        if reward_overrides:
+            for k, v in reward_overrides.items():
+                self.rewards[str(k)] = float(v)
+
+        # Episode horizon (allow runtime override)
+        self.max_steps = int(self.config.get('max_steps', 200)) if max_steps is None else int(max_steps)
         
         # State variables (initialized in reset)
         self.agent_pos = None

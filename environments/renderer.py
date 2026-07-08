@@ -12,7 +12,8 @@ class MazeRenderer:
         self,
         config: Dict[str, Any],
         image_size: int = 64,
-        cell_padding: int = 1
+        cell_padding: int = 1,
+        shield_lights_up: bool = False,
     ):
         """
         Initialize renderer.
@@ -25,6 +26,7 @@ class MazeRenderer:
         self.config = config
         self.image_size = image_size
         self.cell_padding = cell_padding
+        self.shield_lights_up = bool(shield_lights_up)
         
         self.rows, self.cols = config['size']
         
@@ -80,6 +82,11 @@ class MazeRenderer:
 
         # Shield-held indicator: bright cyan border so the CNN can
         # easily distinguish "have shield" from "don't have shield"
+        if has_shield and self.shield_lights_up:
+            # Brighten the entire frame as a global state cue.
+            # (Still keep the border below as a strong, unambiguous signal.)
+            img = np.clip(img.astype(np.int16) + 40, 0, 255).astype(np.uint8)
+
         if has_shield:
             border = max(1, self.cell_size // 3)
             shield_color = self.colors.get('shield', np.array([0, 255, 255], dtype=np.uint8))

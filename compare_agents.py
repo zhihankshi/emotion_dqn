@@ -15,6 +15,23 @@ from agents import SmallDQNNetwork
 from utils import ExperimentLogger
 
 
+def _parse_reward_overrides(pairs: Optional[List[str]]) -> Dict[str, float]:
+    """Parse repeated CLI args like: --reward step=-0.5 --reward timeout=-50."""
+    if not pairs:
+        return {}
+    out: Dict[str, float] = {}
+    for raw in pairs:
+        if "=" not in raw:
+            raise ValueError(f"Invalid --reward '{raw}'. Use key=value.")
+        k, v = raw.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if not k:
+            raise ValueError(f"Invalid --reward '{raw}'. Empty key.")
+        out[k] = float(v)
+    return out
+
+
 def get_run_checkpoint_dir(run_log_dir: Path) -> Path:
     """Return the checkpoints directory for a training run."""
     return Path(run_log_dir) / "checkpoints"
@@ -81,6 +98,9 @@ def analyze_run_checkpoints(
     output_dir: Optional[Path] = None,
     network_size: str = 'standard',
     image_size: int = 64,
+    reward_overrides: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
+    shield_lights_up: Optional[bool] = None,
 ) -> None:
     """Run policy evolution analysis on checkpoints from one training run."""
     from analyze_policy_evolution import analyze_checkpoints, plot_policy_evolution
@@ -125,7 +145,13 @@ def analyze_run_checkpoints(
                 checkpoints,
                 key=lambda p: int(p.stem.split("_episode_")[-1]),
             )[-1]
-            env = VisualMazeEnv(maze_name=maze_name, image_size=image_size)
+            env = VisualMazeEnv(
+                maze_name=maze_name,
+                image_size=image_size,
+                reward_overrides=reward_overrides,
+                max_steps=max_steps,
+                shield_lights_up=shield_lights_up,
+            )
             agent = load_agent_checkpoint(
                 str(final_ckpt),
                 env,
@@ -156,6 +182,9 @@ def run_comparison(
     baseline_checkpoint: Optional[str] = None,
     emotional_checkpoint: Optional[str] = None,
     reset_epsilon: Optional[float] = None,
+    reward_overrides: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
+    shield_lights_up: Optional[bool] = None,
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -251,6 +280,9 @@ def run_comparison(
                 network_class=network_class,
                 pretrained_checkpoint=pretrained_checkpoint,
                 reset_epsilon=reset_epsilon,
+                reward_overrides=reward_overrides,
+                max_steps=max_steps,
+                shield_lights_up=shield_lights_up,
             )
 
             run_metrics = logger.get_run_metrics()
@@ -306,6 +338,9 @@ def run_comparison(
                 output_dir=analysis_dir,
                 network_size=network_size,
                 image_size=image_size,
+                reward_overrides=reward_overrides,
+                max_steps=max_steps,
+                shield_lights_up=shield_lights_up,
             )
 
     if verbose:
@@ -326,6 +361,9 @@ def quick_test(
     checkpoint_interval: int = 50,
     image_size: int = 64,
     network_class=None,
+    reward_overrides: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
+    shield_lights_up: Optional[bool] = None,
 ) -> None:
     """Quick test to verify both agents work and save checkpoints."""
     print("\n" + "=" * 70)
@@ -368,6 +406,9 @@ def quick_test(
                 checkpoint_interval=checkpoint_interval,
                 image_size=image_size,
                 network_class=network_class,
+                reward_overrides=reward_overrides,
+                max_steps=max_steps,
+                shield_lights_up=shield_lights_up,
             )
 
             checkpoint_dir = get_run_checkpoint_dir(Path(logger.log_dir))
@@ -415,6 +456,24 @@ def main():
     parser.add_argument("--eta", type=float, default=0.9,
                         help="η in Q_target = Q + ηδ; shared by baseline and emotional agents")
 
+    parser.add_argument(
+        "--reward",
+        action="append",
+        default=None,
+        help="Override maze rewards at runtime (repeatable), e.g. --reward step=-0.5 --reward timeout=-50",
+    )
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=None,
+        help="Override maze max_steps at runtime",
+    )
+    parser.add_argument(
+        "--shield_lights_up",
+        action="store_true",
+        help="Brighten the entire observation when the agent holds the shield",
+    )
+
     parser.add_argument("--quick_test", action="store_true",
                         help="Run quick test to verify agents work")
 
@@ -453,6 +512,8 @@ def main():
 
     args = parser.parse_args()
 
+    reward_overrides = _parse_reward_overrides(args.reward)
+
     config = {
         "learning_rate": args.lr,
         "gamma": args.gamma,
@@ -479,6 +540,9 @@ def main():
             checkpoint_interval=args.checkpoint_interval,
             image_size=args.image_size,
             network_class=network_class,
+            reward_overrides=reward_overrides,
+            max_steps=args.max_steps,
+            shield_lights_up=args.shield_lights_up,
         )
     else:
         run_comparison(
@@ -499,6 +563,9 @@ def main():
             baseline_checkpoint=args.baseline_checkpoint,
             emotional_checkpoint=args.emotional_checkpoint,
             reset_epsilon=args.reset_epsilon,
+            reward_overrides=reward_overrides,
+            max_steps=args.max_steps,
+            shield_lights_up=args.shield_lights_up,
         )
 
 

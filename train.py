@@ -190,6 +190,9 @@ def train(
     network_class=None,
     pretrained_checkpoint: Optional[str] = None,
     reset_epsilon: Optional[float] = None,
+    reward_overrides: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
+    shield_lights_up: Optional[bool] = None,
 ) -> MetricsLogger:
     """
     Train an agent on the maze.
@@ -235,7 +238,13 @@ def train(
         print(f"  Run ID: {run_id}")
     
     # Create environment
-    env = VisualMazeEnv(maze_name=maze_name, image_size=image_size)
+    env = VisualMazeEnv(
+        maze_name=maze_name,
+        image_size=image_size,
+        reward_overrides=reward_overrides,
+        max_steps=max_steps,
+        shield_lights_up=shield_lights_up,
+    )
 
     epsilon_start = config.get('epsilon_start', 1.0)
     epsilon_end = config.get('epsilon_end', 0.05)
