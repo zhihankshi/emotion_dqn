@@ -70,17 +70,24 @@ def analyze_start_position(agent, env):
     """Analyze Q-values and policy at starting position."""
     obs, info = env.reset()
     q_values = get_q_values_for_state(agent, obs)
-    
+    valid_actions = env.get_valid_actions()
+
     action_names = ['UP', 'DOWN', 'LEFT', 'RIGHT']
-    best_action = action_names[np.argmax(q_values)]
+    best_action_idx = masked_action_selection(
+        q_values, valid_actions, epsilon=0.0, training=False
+    )
+    best_action = action_names[best_action_idx]
+
+    valid_q = q_values[valid_actions]
     
     return {
         'position': info['agent_pos'],
         'q_values': q_values,
+        'valid_actions': valid_actions,
         'best_action': best_action,
-        'q_max': q_values.max(),
-        'q_min': q_values.min(),
-        'q_spread': q_values.max() - q_values.min()
+        'q_max': valid_q.max(),
+        'q_min': valid_q.min(),
+        'q_spread': valid_q.max() - valid_q.min()
     }
 
 
@@ -236,11 +243,16 @@ def plot_policy_evolution(results_df, save_path=None):
     
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     
-    # Q-values at start over time
+    # Q-values at start over time (only valid actions shown solid)
     ax = axes[0, 0]
     q_vals = np.array(results_df['start_q_values'].tolist())
+    valid_set = set(results_df['valid_actions'].iloc[0]) if 'valid_actions' in results_df else {0,1,2,3}
     for i, action in enumerate(['UP', 'DOWN', 'LEFT', 'RIGHT']):
-        ax.plot(results_df['episode'], q_vals[:, i], 'o-', label=action)
+        if i in valid_set:
+            ax.plot(results_df['episode'], q_vals[:, i], 'o-', label=action)
+        else:
+            ax.plot(results_df['episode'], q_vals[:, i], 'x--', alpha=0.3,
+                    label=f'{action} (invalid)')
     ax.set_xlabel('Episode')
     ax.set_ylabel('Q-value at Start')
     ax.set_title('Q-values at Starting Position')
@@ -302,7 +314,7 @@ def plot_policy_evolution(results_df, save_path=None):
         plt.savefig(save_path, dpi=150)
         print(f"Saved plot to {save_path}")
     
-    plt.show()
+    return fig
 
 
 if __name__ == "__main__":

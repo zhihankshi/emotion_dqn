@@ -1,5 +1,5 @@
 name: "shield_trap"
-description: "L-shaped maze: collect shield before trap; balanced rewards with shield-held border indicator"
+description: "L-shaped maze: collect shield before trap; positive goal, step/wall/trap costs"
 
 size: [7, 9]
 
@@ -76,11 +76,11 @@ traps: []
 
 rewards:
   step: -0.1
-  trap_no_shield: -27.0
-  trap_with_shield: -7.0
-  goal: 5.0
-  shield_pickup: 2.0
-  wall_bump: -0.3
+  trap_no_shield: -25.0
+  trap_with_shield: -1.0
+  goal: 10
+  shield_pickup: 10
+  wall_bump: -0.5
 
 max_steps: 200
 
