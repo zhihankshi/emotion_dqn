@@ -100,6 +100,8 @@ class VisualMazeEnv(gym.Env):
         self.has_shield = False
         self.shield_consumed = False
         self.steps = 0
+        self._visit_counts: Dict[Tuple[int, int], int] = {}
+        self._max_visit_count: int = 0
         
         # Metrics for causal understanding
         self.door_attempts_without_key = 0
@@ -140,6 +142,10 @@ class VisualMazeEnv(gym.Env):
         self.has_shield = False
         self.shield_consumed = False
         self.steps = 0
+        self._visit_counts = {}
+        start_pos = tuple(self.agent_pos)
+        self._visit_counts[start_pos] = 1
+        self._max_visit_count = 1
         
         # Reset metrics
         self.door_attempts_without_key = 0
@@ -245,6 +251,19 @@ class VisualMazeEnv(gym.Env):
         truncated = self.steps >= self.max_steps
         if truncated and not terminated:
             reward += self.rewards.get('timeout', 0)
+
+        # Anti-loop shaping: penalize excessive revisits (e.g., right-left oscillations)
+        # This is immediate (unlike timeout) and maze-configurable via:
+        #   rewards.repeat_cell: negative penalty applied when revisiting too often
+        #   rewards.repeat_free_visits: number of visits per cell allowed without penalty (default 2)
+        pos_t = tuple(self.agent_pos)
+        self._visit_counts[pos_t] = self._visit_counts.get(pos_t, 0) + 1
+        self._max_visit_count = max(self._max_visit_count, self._visit_counts[pos_t])
+
+        repeat_penalty = float(self.rewards.get('repeat_cell', 0.0))
+        free_visits = int(self.rewards.get('repeat_free_visits', 2))
+        if repeat_penalty != 0.0 and self._visit_counts[pos_t] > free_visits:
+            reward += repeat_penalty
         
         # Get observation and info
         obs = self._get_observation()
@@ -349,7 +368,9 @@ class VisualMazeEnv(gym.Env):
             'key_pickup_step': self.key_pickup_step,
             'shield_pickup_step': self.shield_pickup_step,
             'trap_hit_step': self.trap_hit_step,
-            'maze_name': self.maze_name
+            'maze_name': self.maze_name,
+            'cell_visit_count': self._visit_counts.get(tuple(self.agent_pos), 0),
+            'max_cell_visit_count': self._max_visit_count,
         }
     
     def render(self) -> Optional[np.ndarray]:

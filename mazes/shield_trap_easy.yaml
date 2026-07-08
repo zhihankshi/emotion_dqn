@@ -43,14 +43,16 @@ traps: []
 
 rewards:
   step: -0.5
-  trap_no_shield: -20.0
-  trap_with_shield: -1.0
+  trap_no_shield: -40.0
+  trap_with_shield: -5.0
   goal: 15
   shield_pickup: 5
   wall_bump: -0.5
   timeout: -50.0
+  repeat_cell: -1.0
+  repeat_free_visits: 2
 
-max_steps: 100
+max_steps: 40
 
 colors:
   agent: [0, 0, 255]
