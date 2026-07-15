@@ -67,6 +67,7 @@ def create_agent(
         'batch_size': config.get('batch_size', 32),
         'target_update_freq': config.get('target_update_freq', 1000),
         'eta': config.get('eta', 0.9),
+        'double_dqn': config.get('double_dqn', False),
         'device': device,
         'seed': seed,
         'network_class': network_class,
@@ -418,6 +419,12 @@ def main():
                        help='Learning rate')
     parser.add_argument('--gamma', type=float, default=0.99,
                        help='Discount factor')
+    parser.add_argument('--double_dqn', action='store_true',
+                       help='Use Double DQN targets to curb Q overestimation')
+    parser.add_argument('--epsilon_end', type=float, default=0.05,
+                       help='Final exploration rate (epsilon floor)')
+    parser.add_argument('--target_update_freq', type=int, default=1000,
+                       help='Gradient updates between target network syncs')
     parser.add_argument('--buffer_size', type=int, default=50000,
                        help='Replay buffer size')
     parser.add_argument('--batch_size', type=int, default=32,
@@ -443,6 +450,9 @@ def main():
         'lambda_mood': args.lambda_mood,
         'eta': args.eta,
         'mood_bounds': (args.mood_min, args.mood_max),
+        'double_dqn': args.double_dqn,
+        'epsilon_end': args.epsilon_end,
+        'target_update_freq': args.target_update_freq,
     }
     
     network_class = resolve_network_class(args.network_size, args.image_size)

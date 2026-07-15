@@ -130,7 +130,8 @@ class DQNAgent:
         eta: float = 0.9,
         device: Optional[str] = None,
         seed: Optional[int] = None,
-        network_class=None
+        network_class=None,
+        double_dqn: bool = False,
     ):
         """
         Initialize DQN agent.
@@ -150,6 +151,8 @@ class DQNAgent:
             device: 'cuda' or 'cpu' (auto-detect if None)
             seed: Random seed
             network_class: Network class to use (default: DQNNetwork)
+            double_dqn: Use Double DQN targets (policy net selects the next
+                action, target net evaluates it) to curb overestimation
         """
         self.observation_shape = observation_shape
         self.n_actions = n_actions
@@ -157,6 +160,7 @@ class DQNAgent:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.eta = eta
+        self.double_dqn = double_dqn
         
         # Exploration parameters
         self.epsilon = epsilon_start
@@ -269,7 +273,14 @@ class DQNAgent:
         
         # Target Q values (paper eq. 3.1.3: Q + ηδ)
         with torch.no_grad():
-            next_q = self.target_net(next_states_t).max(dim=1)[0]
+            if self.double_dqn:
+                # Double DQN: policy net picks the action, target net scores it
+                next_actions = self.policy_net(next_states_t).argmax(dim=1)
+                next_q = self.target_net(next_states_t).gather(
+                    1, next_actions.unsqueeze(1)
+                ).squeeze(1)
+            else:
+                next_q = self.target_net(next_states_t).max(dim=1)[0]
             standard_target = rewards_t + self.gamma * next_q * (1 - dones_t)
             td_error = standard_target - current_q
             target_q = current_q.detach() + self.eta * td_error.detach()

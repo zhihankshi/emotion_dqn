@@ -91,6 +91,87 @@ def save_checkpoint_manifest(
     return path
 
 
+def evaluate_run_checkpoints_greedy(
+    entry: Dict[str, Any],
+    maze_name: str,
+    network_size: str = "standard",
+    image_size: int = 64,
+    reward_overrides: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
+    shield_lights_up: Optional[bool] = None,
+    frame_stack: int = 1,
+) -> Optional[Dict[str, Any]]:
+    """
+    Greedy-evaluate (epsilon=0) every saved checkpoint of one training run.
+
+    The maze and greedy policy are deterministic, so a single rollout per
+    checkpoint fully characterizes its greedy behavior. Prints a table,
+    saves greedy_checkpoint_eval.json in the run dir, and returns the best
+    checkpoint entry (success first, then total reward).
+    """
+    from environments import VisualMazeEnv
+    from analyze_policy_evolution import load_agent_checkpoint
+    from utils.trajectory_diagnostics import rollout_episode
+
+    checkpoints = [Path(p) for p in entry.get("checkpoints", [])]
+    if not checkpoints:
+        return None
+
+    agent_type = entry["agent_type"]
+    env = VisualMazeEnv(
+        maze_name=maze_name,
+        image_size=image_size,
+        reward_overrides=reward_overrides,
+        max_steps=max_steps,
+        shield_lights_up=shield_lights_up,
+        frame_stack=frame_stack,
+    )
+
+    results: List[Dict[str, Any]] = []
+    for ckpt in sorted(checkpoints, key=lambda p: int(p.stem.split("_episode_")[-1])):
+        episode_num = int(ckpt.stem.split("_episode_")[-1])
+        agent = load_agent_checkpoint(
+            str(ckpt),
+            env,
+            agent_type=agent_type,
+            network_size=network_size,
+            image_size=image_size,
+        )
+        _, summary = rollout_episode(
+            agent, env,
+            rollout_id=0,
+            stage=f"episode_{episode_num}",
+            checkpoint_episode=episode_num,
+        )
+        results.append({
+            "checkpoint_episode": episode_num,
+            "checkpoint_path": str(ckpt),
+            "success": bool(summary["success"]),
+            "total_reward": summary["total_reward"],
+            "total_steps": summary["total_steps"],
+            "path_type": summary["path_type"],
+        })
+
+    best = max(results, key=lambda r: (r["success"], r["total_reward"]))
+
+    print(f"\n  Greedy checkpoint evaluation ({agent_type} run {entry['run_id']}):")
+    print(f"    {'episode':>8} {'success':>8} {'reward':>9} {'steps':>6}  path_type")
+    for r in results:
+        marker = "  <-- best" if r is best else ""
+        print(
+            f"    {r['checkpoint_episode']:>8} {str(r['success']):>8} "
+            f"{r['total_reward']:>9.2f} {r['total_steps']:>6}  {r['path_type']}{marker}"
+        )
+
+    eval_path = Path(entry["run_log_dir"]) / "greedy_checkpoint_eval.json"
+    with open(eval_path, "w", encoding="utf-8") as f:
+        json.dump({"results": results, "best": best}, f, indent=2)
+    print(f"    Saved: {eval_path}")
+    print(f"    Best checkpoint: {best['checkpoint_path']}")
+
+    return best
+
+
 def analyze_run_checkpoints(
     entry: Dict[str, Any],
     maze_name: str,
@@ -304,6 +385,22 @@ def run_comparison(
             )
             checkpoint_manifest.append(entry)
 
+            # Greedy-evaluate every checkpoint so a late-training collapse
+            # doesn't hide the best policy found during the run
+            try:
+                evaluate_run_checkpoints_greedy(
+                    entry=entry,
+                    maze_name=maze_name,
+                    network_size=network_size,
+                    image_size=image_size,
+                    reward_overrides=reward_overrides,
+                    max_steps=max_steps,
+                    shield_lights_up=shield_lights_up,
+                    frame_stack=frame_stack,
+                )
+            except Exception as e:
+                print(f"  (greedy checkpoint eval failed: {e})")
+
             overall_pbar.update(1)
 
             if verbose:
@@ -513,6 +610,12 @@ def main():
                         help="Learning rate")
     parser.add_argument("--gamma", type=float, default=0.99,
                         help="Discount factor")
+    parser.add_argument("--double_dqn", action="store_true",
+                        help="Use Double DQN targets to curb Q overestimation")
+    parser.add_argument("--epsilon_end", type=float, default=0.05,
+                        help="Final exploration rate (epsilon floor)")
+    parser.add_argument("--target_update_freq", type=int, default=1000,
+                        help="Gradient updates between target network syncs")
     parser.add_argument("--buffer_size", type=int, default=50000,
                         help="Replay buffer size")
     parser.add_argument("--batch_size", type=int, default=32,
@@ -544,6 +647,9 @@ def main():
         "lambda_mood": args.lambda_mood,
         "eta": args.eta,
         "mood_bounds": (args.mood_min, args.mood_max),
+        "double_dqn": args.double_dqn,
+        "epsilon_end": args.epsilon_end,
+        "target_update_freq": args.target_update_freq,
     }
 
     analysis_episodes = None

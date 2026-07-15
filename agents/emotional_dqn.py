@@ -86,7 +86,8 @@ class EmotionalDQNAgent:
         # Other
         device: Optional[str] = None,
         seed: Optional[int] = None,
-        network_class=None
+        network_class=None,
+        double_dqn: bool = False,
     ):
         """
         Initialize Emotional DQN agent.
@@ -104,6 +105,7 @@ class EmotionalDQNAgent:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.eta = eta
+        self.double_dqn = double_dqn
 
         # Exploration
         self.epsilon = epsilon_start
@@ -215,7 +217,14 @@ class EmotionalDQNAgent:
 
         # Next Q values from TARGET network (frozen): max_a' Q_target(s', a')
         with torch.no_grad():
-            next_q = self.target_net(next_states_t).max(dim=1)[0]
+            if self.double_dqn:
+                # Double DQN: policy net picks the action, target net scores it
+                next_actions = self.policy_net(next_states_t).argmax(dim=1)
+                next_q = self.target_net(next_states_t).gather(
+                    1, next_actions.unsqueeze(1)
+                ).squeeze(1)
+            else:
+                next_q = self.target_net(next_states_t).max(dim=1)[0]
 
             # Standard TD target: r + γ * max Q'
             standard_target = rewards_t + self.gamma * next_q * (1 - dones_t)
