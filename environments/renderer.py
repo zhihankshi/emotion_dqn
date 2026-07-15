@@ -161,6 +161,10 @@ class MazeRenderer:
             ay2 = y2 - margin
             ax1 = x1 + margin
             ax2 = x2 - margin
+            if ay2 <= ay1 or ax2 <= ax1:
+                # Tiny cells (small image_size): fill the whole cell so the
+                # agent is never invisible in its own observation
+                ay1, ay2, ax1, ax2 = y1, y2, x1, x2
             img[ay1:ay2, ax1:ax2] = self.colors['agent']
     
     def render_with_info(

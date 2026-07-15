@@ -4,6 +4,7 @@ Gymnasium-compatible environment with pixel observations.
 """
 import gymnasium as gym
 import numpy as np
+from collections import deque
 from gymnasium import spaces
 from typing import Optional, Tuple, Dict, Any, List, Sequence, Mapping
 
@@ -43,6 +44,7 @@ class VisualMazeEnv(gym.Env):
         reward_overrides: Optional[Mapping[str, float]] = None,
         max_steps: Optional[int] = None,
         shield_lights_up: Optional[bool] = None,
+        frame_stack: int = 1,
     ):
         """
         Initialize the visual maze environment.
@@ -52,6 +54,8 @@ class VisualMazeEnv(gym.Env):
             render_mode: "rgb_array" or "human"
             image_size: Size of square observation image
             mazes_dir: Directory containing maze YAML files
+            frame_stack: Number of most-recent frames stacked along the
+                channel axis (Nature DQN style). 1 = single frame.
         """
         super().__init__()
         
@@ -126,12 +130,16 @@ class VisualMazeEnv(gym.Env):
         self.shield_pickup_step = -1
         self.trap_hit_step = -1
         
+        # Frame stacking (channel-axis concat of the m most recent frames)
+        self.frame_stack = max(1, int(frame_stack))
+        self._frames: deque = deque(maxlen=self.frame_stack)
+
         # Define spaces
         self.action_space = spaces.Discrete(4)
         self.observation_space = spaces.Box(
             low=0,
             high=255,
-            shape=(3, image_size, image_size),
+            shape=(3 * self.frame_stack, image_size, image_size),
             dtype=np.uint8
         )
     
@@ -170,7 +178,8 @@ class VisualMazeEnv(gym.Env):
         self.shield_pickup_step = -1
         self.trap_hit_step = -1
         
-        # Get observation
+        # Get observation (fresh frame history each episode)
+        self._frames.clear()
         obs = self._get_observation()
         info = self._get_info()
         
@@ -343,13 +352,21 @@ class VisualMazeEnv(gym.Env):
         has_shield: bool = False,
         shield_consumed: bool = False,
     ) -> np.ndarray:
-        """Place the agent in a specific state and return the rendered observation."""
+        """
+        Place the agent in a specific state and return the rendered observation.
+
+        With frame stacking, returns a static stack (the same frame repeated),
+        without touching the live frame history.
+        """
         self.agent_pos = list(agent_pos)
         self.has_key = has_key
         self.door_open = door_open
         self.has_shield = has_shield
         self.shield_consumed = shield_consumed
-        return self._get_observation()
+        frame = self._render_frame()
+        if self.frame_stack <= 1:
+            return frame
+        return np.concatenate([frame] * self.frame_stack, axis=0)
 
     def iter_walkable_cells(self) -> List[Tuple[int, int]]:
         """All non-wall grid cells."""
@@ -360,8 +377,8 @@ class VisualMazeEnv(gym.Env):
             if (row, col) not in self.wall_set
         ]
 
-    def _get_observation(self) -> np.ndarray:
-        """Render current state to pixel observation (C, H, W)."""
+    def _render_frame(self) -> np.ndarray:
+        """Render current state to a single pixel frame (3, H, W)."""
         observation = self.renderer.render(
             agent_pos=self.agent_pos,
             has_key=self.has_key,
@@ -371,6 +388,23 @@ class VisualMazeEnv(gym.Env):
         )
         observation = np.transpose(observation, (2, 0, 1))
         return observation
+
+    def _get_observation(self) -> np.ndarray:
+        """
+        Current observation: single frame, or the m most recent frames
+        concatenated along the channel axis when frame_stack > 1.
+
+        Maintains the frame history; intended to be called once per
+        reset()/step() transition.
+        """
+        frame = self._render_frame()
+        if self.frame_stack <= 1:
+            return frame
+        self._frames.append(frame)
+        while len(self._frames) < self.frame_stack:
+            # Pad on episode start by repeating the first frame
+            self._frames.appendleft(frame)
+        return np.concatenate(list(self._frames), axis=0)
     
     def _get_info(self) -> Dict[str, Any]:
         """Get current state info for debugging and metrics."""
@@ -400,11 +434,11 @@ class VisualMazeEnv(gym.Env):
             RGB array if render_mode is "rgb_array", else None
         """
         if self.render_mode == "rgb_array":
-            return self._get_observation()
+            return self._render_frame()
         elif self.render_mode == "human":
             # Could add pygame window here for human viewing
             # For now, just return the array
-            return self._get_observation()
+            return self._render_frame()
         return None
     
     def get_state_summary(self) -> str:

@@ -194,6 +194,7 @@ def train(
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
     show_tqdm: bool = True,
+    frame_stack: int = 1,
 ) -> MetricsLogger:
     """
     Train an agent on the maze.
@@ -245,6 +246,7 @@ def train(
         reward_overrides=reward_overrides,
         max_steps=max_steps,
         shield_lights_up=shield_lights_up,
+        frame_stack=frame_stack,
     )
 
     epsilon_start = config.get('epsilon_start', 1.0)
@@ -387,6 +389,8 @@ def main():
                        help='Name of maze to use')
     parser.add_argument('--image_size', type=int, default=64,
                        help='Observation image size (64 for standard, 7 for 1px/cell)')
+    parser.add_argument('--frame_stack', type=int, default=1,
+                       help='Stack the m most recent frames along channels (Nature DQN m=4)')
     parser.add_argument('--network_size', type=str, default='standard',
                        choices=['standard', 'small'],
                        help='Network architecture size')
@@ -458,6 +462,7 @@ def main():
         checkpoint_interval=args.checkpoint_interval,
         image_size=args.image_size,
         network_class=network_class,
+        frame_stack=args.frame_stack,
     )
 
 

@@ -101,6 +101,7 @@ def analyze_run_checkpoints(
     reward_overrides: Optional[Dict[str, float]] = None,
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
+    frame_stack: int = 1,
 ) -> None:
     """Run policy evolution analysis on checkpoints from one training run."""
     from analyze_policy_evolution import analyze_checkpoints, plot_policy_evolution
@@ -151,6 +152,7 @@ def analyze_run_checkpoints(
                 reward_overrides=reward_overrides,
                 max_steps=max_steps,
                 shield_lights_up=shield_lights_up,
+                frame_stack=frame_stack,
             )
             agent = load_agent_checkpoint(
                 str(final_ckpt),
@@ -186,6 +188,7 @@ def run_comparison(
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
     show_tqdm: bool = False,
+    frame_stack: int = 1,
 ) -> ExperimentLogger:
     """
     Run comparison experiment between baseline and emotional agents.
@@ -285,6 +288,7 @@ def run_comparison(
                 max_steps=max_steps,
                 shield_lights_up=shield_lights_up,
                 show_tqdm=show_tqdm,
+                frame_stack=frame_stack,
             )
 
             run_metrics = logger.get_run_metrics()
@@ -343,6 +347,7 @@ def run_comparison(
                 reward_overrides=reward_overrides,
                 max_steps=max_steps,
                 shield_lights_up=shield_lights_up,
+                frame_stack=frame_stack,
             )
 
     if verbose:
@@ -367,6 +372,7 @@ def quick_test(
     max_steps: Optional[int] = None,
     shield_lights_up: Optional[bool] = None,
     show_tqdm: bool = False,
+    frame_stack: int = 1,
 ) -> None:
     """Quick test to verify both agents work and save checkpoints."""
     print("\n" + "=" * 70)
@@ -413,6 +419,7 @@ def quick_test(
                 max_steps=max_steps,
                 shield_lights_up=shield_lights_up,
                 show_tqdm=show_tqdm,
+                frame_stack=frame_stack,
             )
 
             checkpoint_dir = get_run_checkpoint_dir(Path(logger.log_dir))
@@ -481,6 +488,12 @@ def main():
         "--tqdm",
         action="store_true",
         help="Show per-episode tqdm bars (off by default to reduce console clutter)",
+    )
+    parser.add_argument(
+        "--frame_stack",
+        type=int,
+        default=1,
+        help="Stack the m most recent frames along channels (Nature DQN m=4)",
     )
 
     parser.add_argument("--quick_test", action="store_true",
@@ -553,6 +566,7 @@ def main():
             max_steps=args.max_steps,
             shield_lights_up=args.shield_lights_up,
             show_tqdm=args.tqdm,
+            frame_stack=args.frame_stack,
         )
     else:
         run_comparison(
@@ -577,6 +591,7 @@ def main():
             max_steps=args.max_steps,
             shield_lights_up=args.shield_lights_up,
             show_tqdm=args.tqdm,
+            frame_stack=args.frame_stack,
         )
 
 

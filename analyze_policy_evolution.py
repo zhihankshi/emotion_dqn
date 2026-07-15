@@ -32,7 +32,8 @@ def load_agent_checkpoint(
     else:
         network_class = DQNNetwork
 
-    observation_shape = (3, image_size, image_size)
+    # Use the env's observation space so frame-stacked agents load correctly
+    observation_shape = tuple(env.observation_space.shape)
 
     if agent_type == 'emotional':
         agent = EmotionalDQNAgent(

@@ -1,0 +1,4 @@
+stage,checkpoint_episode,path_type,count,mean_reward,std_reward,mean_steps,std_steps,success_rate
+early,50,shield_route,10,-102.0,0.0,40.0,0.0,0.0
+late,100,shield_route,10,-102.0,0.0,40.0,0.0,0.0
+mid,80,shield_route,10,-102.0,0.0,40.0,0.0,0.0
