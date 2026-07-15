@@ -35,7 +35,8 @@ class ReplayBuffer:
         action: int,
         reward: float,
         next_state: np.ndarray,
-        done: bool
+        done: bool,
+        next_valid_mask: Optional[np.ndarray] = None,
     ) -> None:
         """
         Add a transition to the buffer.
@@ -46,8 +47,11 @@ class ReplayBuffer:
             reward: Reward received
             next_state: Next state (observation)
             done: Whether episode terminated
+            next_valid_mask: Float mask (n_actions,) with 1 for actions valid
+                in next_state, 0 for invalid. Used to restrict the bootstrap
+                max/argmax to actions the agent could actually take.
         """
-        self.buffer.append((state, action, reward, next_state, done))
+        self.buffer.append((state, action, reward, next_state, done, next_valid_mask))
     
     def sample(self, batch_size: int) -> Tuple[np.ndarray, ...]:
         """
@@ -57,7 +61,7 @@ class ReplayBuffer:
             batch_size: Number of transitions to sample
         
         Returns:
-            Tuple of (states, actions, rewards, next_states, dones)
+            Tuple of (states, actions, rewards, next_states, dones, next_valid_masks)
             Each is a numpy array with batch_size elements
         """
         batch = random.sample(self.buffer, batch_size)
@@ -67,8 +71,9 @@ class ReplayBuffer:
         rewards = np.array([t[2] for t in batch], dtype=np.float32)
         next_states = np.array([t[3] for t in batch])
         dones = np.array([t[4] for t in batch], dtype=np.float32)
+        next_valid_masks = np.array([t[5] for t in batch], dtype=np.float32)
         
-        return states, actions, rewards, next_states, dones
+        return states, actions, rewards, next_states, dones, next_valid_masks
     
     def __len__(self) -> int:
         """Return current buffer size."""
@@ -254,20 +259,22 @@ if __name__ == "__main__":
         reward = np.random.randn()
         next_state = np.random.rand(64, 64, 3).astype(np.uint8)
         done = i % 20 == 0
+        mask = np.ones(4, dtype=np.float32)
         
-        buffer.push(state, action, reward, next_state, done)
+        buffer.push(state, action, reward, next_state, done, mask)
     
     print(f"  Buffer size: {len(buffer)}")
     print(f"  Ready for batch of 32: {buffer.is_ready(32)}")
     
     # Sample a batch
-    states, actions, rewards, next_states, dones = buffer.sample(32)
+    states, actions, rewards, next_states, dones, next_valid_masks = buffer.sample(32)
     print(f"  Sampled batch shapes:")
     print(f"    states: {states.shape}")
     print(f"    actions: {actions.shape}")
     print(f"    rewards: {rewards.shape}")
     print(f"    next_states: {next_states.shape}")
     print(f"    dones: {dones.shape}")
+    print(f"    next_valid_masks: {next_valid_masks.shape}")
     
     print("✓ ReplayBuffer works!")
     

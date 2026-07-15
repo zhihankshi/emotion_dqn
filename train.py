@@ -136,7 +136,13 @@ def train_episode(
         
         # Update agent
         if training:
-            update_metrics = agent.step(obs, action, reward, next_obs, done)
+            # Valid actions in the next state, so the bootstrap target only
+            # considers actions the agent could actually take there
+            next_valid_actions = env.get_valid_actions()
+            update_metrics = agent.step(
+                obs, action, reward, next_obs, done,
+                next_valid_actions=next_valid_actions,
+            )
             
             if update_metrics:
                 losses.append(update_metrics.get('loss', 0))

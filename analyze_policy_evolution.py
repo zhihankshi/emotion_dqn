@@ -139,10 +139,21 @@ def analyze_checkpoints(
     agent_type=None,
     network_size='standard',
     image_size=64,
+    reward_overrides=None,
+    max_steps=None,
+    shield_lights_up=None,
+    frame_stack=1,
 ):
     """Analyze policy at different checkpoints."""
     
-    env = VisualMazeEnv(maze_name=maze_name, image_size=image_size)
+    env = VisualMazeEnv(
+        maze_name=maze_name,
+        image_size=image_size,
+        reward_overrides=reward_overrides,
+        max_steps=max_steps,
+        shield_lights_up=shield_lights_up,
+        frame_stack=frame_stack,
+    )
     
     if episodes_to_analyze is None:
         episodes_to_analyze = [60, 80, 100, 150, 200, 250, 300, 400, 500, 800]
@@ -332,6 +343,8 @@ if __name__ == "__main__":
                         help='Agent type (auto-detected from checkpoint if omitted)')
     
     parser.add_argument('--episodes', type=str, default='60,80,100,150,200,250,300,400,500,800')
+    parser.add_argument('--frame_stack', type=int, default=1,
+                        help='Frames stacked in the training environment')
     args = parser.parse_args()
     
     episodes = [int(e) for e in args.episodes.split(',')]
@@ -343,6 +356,7 @@ if __name__ == "__main__":
         agent_type=args.agent_type,
         network_size=args.network_size,
         image_size=args.image_size,
+        frame_stack=args.frame_stack,
     )
     
     if results is not None:

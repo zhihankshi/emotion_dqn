@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "checkpoint_episode": 20,
+      "checkpoint_path": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931\\checkpoints\\agent_episode_20.pt",
+      "success": true,
+      "total_reward": 10.0,
+      "total_steps": 8,
+      "path_type": "shield_route"
+    },
+    {
+      "checkpoint_episode": 40,
+      "checkpoint_path": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931\\checkpoints\\agent_episode_40.pt",
+      "success": false,
+      "total_reward": -102.0,
+      "total_steps": 40,
+      "path_type": "timeout"
+    }
+  ],
+  "best": {
+    "checkpoint_episode": 20,
+    "checkpoint_path": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931\\checkpoints\\agent_episode_20.pt",
+    "success": true,
+    "total_reward": 10.0,
+    "total_steps": 8,
+    "path_type": "shield_route"
+  }
+}

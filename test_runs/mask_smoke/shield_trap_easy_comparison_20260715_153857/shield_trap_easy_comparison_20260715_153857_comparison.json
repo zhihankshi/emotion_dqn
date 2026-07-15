@@ -1,0 +1,68 @@
+{
+  "experiment_name": "shield_trap_easy_comparison_20260715_153857",
+  "timestamp": "2026-07-15T15:40:01.682581",
+  "comparison": {
+    "baseline": {
+      "n_runs": 1,
+      "first_success_mean": NaN,
+      "first_success_std": NaN,
+      "final_success_rate_mean": 0.825,
+      "final_success_rate_std": 0.0,
+      "final_avg_steps_mean": 18.5,
+      "final_avg_steps_std": 0.0,
+      "episodes_to_50_mean": NaN,
+      "episodes_to_90_mean": NaN
+    },
+    "emotional": {
+      "n_runs": 1,
+      "first_success_mean": NaN,
+      "first_success_std": NaN,
+      "final_success_rate_mean": 0.875,
+      "final_success_rate_std": 0.0,
+      "final_avg_steps_mean": 17.65,
+      "final_avg_steps_std": 0.0,
+      "episodes_to_50_mean": NaN,
+      "episodes_to_90_mean": NaN
+    }
+  },
+  "all_runs": {
+    "baseline": [
+      {
+        "run_id": 0,
+        "agent_type": "baseline",
+        "maze_name": "shield_trap_easy",
+        "total_episodes": 40,
+        "first_success_episode": 0,
+        "total_successes": 33,
+        "final_success_rate": 0.825,
+        "final_avg_steps": 18.5,
+        "final_avg_reward": -23.125,
+        "episodes_to_50_percent_success": -1,
+        "episodes_to_90_percent_success": -1,
+        "avg_door_attempts_before_first_key": 0.0,
+        "avg_key_found_step": 0.0,
+        "avg_exploration_boosts_per_episode": 0.0,
+        "total_mood_bias_applied": 0.0
+      }
+    ],
+    "emotional": [
+      {
+        "run_id": 0,
+        "agent_type": "emotional",
+        "maze_name": "shield_trap_easy",
+        "total_episodes": 40,
+        "first_success_episode": 0,
+        "total_successes": 35,
+        "final_success_rate": 0.875,
+        "final_avg_steps": 17.65,
+        "final_avg_reward": -18.775,
+        "episodes_to_50_percent_success": -1,
+        "episodes_to_90_percent_success": -1,
+        "avg_door_attempts_before_first_key": 0.0,
+        "avg_key_found_step": 0.0,
+        "avg_exploration_boosts_per_episode": 0.0,
+        "total_mood_bias_applied": 0.0
+      }
+    ]
+  }
+}

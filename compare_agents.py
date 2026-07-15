@@ -201,6 +201,10 @@ def analyze_run_checkpoints(
         agent_type=agent_type,
         network_size=network_size,
         image_size=image_size,
+        reward_overrides=reward_overrides,
+        max_steps=max_steps,
+        shield_lights_up=shield_lights_up,
+        frame_stack=frame_stack,
     )
 
     if results is None or results.empty:
@@ -299,7 +303,9 @@ def run_comparison(
         print(f"  Maze: {maze_name}")
         print(f"  Runs per agent: {n_runs}")
         print(f"  Episodes per run: {n_episodes}")
-        print(f"  Epsilon decay: 1.0 -> 0.05 over {n_episodes} episodes")
+        eps_start = (config or {}).get("epsilon_start", 1.0)
+        eps_end = (config or {}).get("epsilon_end", 0.05)
+        print(f"  Epsilon decay: {eps_start} -> {eps_end} over {n_episodes} episodes")
         print(f"  Checkpoint interval: {checkpoint_interval}")
         print(f"  Planned checkpoint episodes: {planned_episodes}")
         print(f"  Total training runs: {n_runs * 2}")

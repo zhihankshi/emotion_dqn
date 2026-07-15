@@ -241,10 +241,23 @@ class DQNAgent:
         action: int,
         reward: float,
         next_state: np.ndarray,
-        done: bool
+        done: bool,
+        next_valid_actions: Optional[Sequence[int]] = None,
     ) -> None:
-        """Store a transition in replay buffer."""
-        self.replay_buffer.push(state, action, reward, next_state, done)
+        """Store a transition in replay buffer.
+
+        next_valid_actions: actions legal in next_state. Invalid actions are
+        excluded from the bootstrap target, so Q-values that never receive
+        real experience cannot inflate the targets. None = all actions valid.
+        """
+        mask = np.zeros(self.n_actions, dtype=np.float32)
+        if next_valid_actions is None:
+            mask[:] = 1.0
+        else:
+            mask[list(next_valid_actions)] = 1.0
+            if mask.sum() == 0:
+                mask[:] = 1.0
+        self.replay_buffer.push(state, action, reward, next_state, done, mask)
     
     def update(self) -> Optional[Dict[str, float]]:
         """
@@ -257,8 +270,8 @@ class DQNAgent:
             return None
         
         # Sample batch
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(
-            self.batch_size
+        states, actions, rewards, next_states, dones, next_valid_masks = (
+            self.replay_buffer.sample(self.batch_size)
         )
         
         # Convert to tensors
@@ -267,20 +280,27 @@ class DQNAgent:
         rewards_t = torch.from_numpy(rewards).to(self.device)
         next_states_t = torch.from_numpy(next_states).to(self.device)
         dones_t = torch.from_numpy(dones).to(self.device)
+        masks_t = torch.from_numpy(next_valid_masks).to(self.device)
         
         # Current Q values
         current_q = self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
         
         # Target Q values (paper eq. 3.1.3: Q + ηδ)
+        # Invalid next-state actions are excluded from the max/argmax: they are
+        # never executed (rollouts mask them), so their Q-values get no gradient
+        # signal from real experience and would otherwise inflate the bootstrap.
         with torch.no_grad():
+            invalid = masks_t == 0
             if self.double_dqn:
                 # Double DQN: policy net picks the action, target net scores it
-                next_actions = self.policy_net(next_states_t).argmax(dim=1)
+                next_policy_q = self.policy_net(next_states_t).masked_fill(invalid, -1e9)
+                next_actions = next_policy_q.argmax(dim=1)
                 next_q = self.target_net(next_states_t).gather(
                     1, next_actions.unsqueeze(1)
                 ).squeeze(1)
             else:
-                next_q = self.target_net(next_states_t).max(dim=1)[0]
+                next_target_q = self.target_net(next_states_t).masked_fill(invalid, -1e9)
+                next_q = next_target_q.max(dim=1)[0]
             standard_target = rewards_t + self.gamma * next_q * (1 - dones_t)
             td_error = standard_target - current_q
             target_q = current_q.detach() + self.eta * td_error.detach()
@@ -317,7 +337,8 @@ class DQNAgent:
         action: int,
         reward: float,
         next_state: np.ndarray,
-        done: bool
+        done: bool,
+        next_valid_actions: Optional[Sequence[int]] = None,
     ) -> Optional[Dict[str, float]]:
         """
         Complete step: store transition and update network.
@@ -328,7 +349,7 @@ class DQNAgent:
         self.steps += 1
         
         # Store transition
-        self.store_transition(state, action, reward, next_state, done)
+        self.store_transition(state, action, reward, next_state, done, next_valid_actions)
         
         # Update
         metrics = self.update()

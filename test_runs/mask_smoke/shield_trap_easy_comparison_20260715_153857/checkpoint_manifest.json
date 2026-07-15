@@ -1,0 +1,40 @@
+{
+  "maze_name": "shield_trap_easy",
+  "n_episodes": 40,
+  "checkpoint_interval": 20,
+  "checkpoint_filename_format": "agent_episode_{episode}.pt",
+  "runs": [
+    {
+      "agent_type": "baseline",
+      "run_id": 0,
+      "seed": 42,
+      "run_log_dir": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\baseline\\shield_trap_easy_20260715_153859",
+      "checkpoint_dir": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\baseline\\shield_trap_easy_20260715_153859\\checkpoints",
+      "checkpoint_count": 2,
+      "checkpoints": [
+        "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\baseline\\shield_trap_easy_20260715_153859\\checkpoints\\agent_episode_20.pt",
+        "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\baseline\\shield_trap_easy_20260715_153859\\checkpoints\\agent_episode_40.pt"
+      ],
+      "planned_checkpoint_episodes": [
+        20,
+        40
+      ]
+    },
+    {
+      "agent_type": "emotional",
+      "run_id": 0,
+      "seed": 42,
+      "run_log_dir": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931",
+      "checkpoint_dir": "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931\\checkpoints",
+      "checkpoint_count": 2,
+      "checkpoints": [
+        "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931\\checkpoints\\agent_episode_20.pt",
+        "test_runs\\mask_smoke\\shield_trap_easy_comparison_20260715_153857\\emotional\\shield_trap_easy_20260715_153931\\checkpoints\\agent_episode_40.pt"
+      ],
+      "planned_checkpoint_episodes": [
+        20,
+        40
+      ]
+    }
+  ]
+}
