@@ -52,6 +52,7 @@ def run_transfer_training(
     checkpoint_interval: int = 50,
     image_size: int = 64,
     network_class=None,
+    frame_stack: int = 1,
     verbose: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -73,6 +74,8 @@ def run_transfer_training(
         "mood_bounds": tuple(config.get("mood_bounds", (-1.0, 1.0))),
         "epsilon_start": 1.0,
         "epsilon_end": epsilon_end,
+        "double_dqn": config.get("double_dqn", False),
+        "target_update_freq": config.get("target_update_freq", 1000),
     }
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -94,6 +97,8 @@ def run_transfer_training(
         print(f"  Phase 1 episodes:  {phase1_episodes}")
         print(f"  Phase 2 episodes:  {phase2_episodes}")
         print(f"  Transfer epsilon:  {transfer_epsilon} -> {epsilon_end}")
+        print(f"  Frame stack:       {frame_stack}")
+        print(f"  Double DQN:        {config['double_dqn']}")
         print(f"  Experiment dir:    {experiment_dir}")
         print("=" * 70)
 
@@ -114,6 +119,7 @@ def run_transfer_training(
         checkpoint_interval=checkpoint_interval,
         image_size=image_size,
         network_class=network_class,
+        frame_stack=frame_stack,
     )
 
     checkpoint_path = resolve_transfer_checkpoint(
@@ -143,6 +149,7 @@ def run_transfer_training(
         network_class=network_class,
         pretrained_checkpoint=str(checkpoint_path),
         reset_epsilon=transfer_epsilon,
+        frame_stack=frame_stack,
     )
 
     manifest = {
@@ -153,6 +160,8 @@ def run_transfer_training(
         "phase2_episodes": phase2_episodes,
         "transfer_epsilon": transfer_epsilon,
         "epsilon_end": epsilon_end,
+        "frame_stack": frame_stack,
+        "double_dqn": config["double_dqn"],
         "seed": seed,
         "checkpoint_used": str(checkpoint_path),
         "phase1_log_dir": str(phase1_logger.log_dir),
@@ -231,6 +240,12 @@ def main():
     parser.add_argument("--eta", type=float, default=0.9)
     parser.add_argument("--mood_min", type=float, default=-1.0)
     parser.add_argument("--mood_max", type=float, default=1.0)
+    parser.add_argument("--frame_stack", type=int, default=1,
+                        help="Number of frames to stack in observations")
+    parser.add_argument("--double_dqn", action="store_true",
+                        help="Use Double DQN targets to curb Q overestimation")
+    parser.add_argument("--target_update_freq", type=int, default=1000,
+                        help="Gradient updates between target network syncs")
 
     args = parser.parse_args()
 
@@ -244,6 +259,8 @@ def main():
         "lambda_mood": args.lambda_mood,
         "eta": args.eta,
         "mood_bounds": (args.mood_min, args.mood_max),
+        "double_dqn": args.double_dqn,
+        "target_update_freq": args.target_update_freq,
     }
 
     run_transfer_training(
@@ -261,6 +278,7 @@ def main():
         checkpoint_interval=args.checkpoint_interval,
         image_size=args.image_size,
         network_class=network_class,
+        frame_stack=args.frame_stack,
     )
 
 

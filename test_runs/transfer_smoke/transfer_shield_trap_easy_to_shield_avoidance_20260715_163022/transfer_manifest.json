@@ -1,0 +1,48 @@
+{
+  "source_maze": "shield_trap_easy",
+  "target_maze": "shield_avoidance",
+  "agent_type": "baseline",
+  "phase1_episodes": 20,
+  "phase2_episodes": 20,
+  "transfer_epsilon": 0.3,
+  "epsilon_end": 0.1,
+  "frame_stack": 3,
+  "double_dqn": true,
+  "seed": 42,
+  "checkpoint_used": "test_runs\\transfer_smoke\\transfer_shield_trap_easy_to_shield_avoidance_20260715_163022\\phase1\\shield_trap_easy_20260715_163025\\checkpoints\\agent_episode_20.pt",
+  "phase1_log_dir": "test_runs\\transfer_smoke\\transfer_shield_trap_easy_to_shield_avoidance_20260715_163022\\phase1\\shield_trap_easy_20260715_163025",
+  "phase2_log_dir": "test_runs\\transfer_smoke\\transfer_shield_trap_easy_to_shield_avoidance_20260715_163022\\phase2\\shield_avoidance_20260715_163040",
+  "phase1_summary": {
+    "total_episodes": 20,
+    "success_rate": 0.9,
+    "avg_steps": 16.1,
+    "avg_reward": -11.9,
+    "first_success": 0,
+    "total_successes": 18,
+    "path_type_counts": {
+      "shield_route": 16,
+      "other": 1,
+      "trap_rush": 1,
+      "timeout": 2
+    },
+    "avg_shield_pickup_step": 1.3157894736842106,
+    "avg_trap_hit_step": 8.5,
+    "avg_door_attempts_without_key": 0.0
+  },
+  "phase2_summary": {
+    "total_episodes": 20,
+    "success_rate": 0.3,
+    "avg_steps": 85.3,
+    "avg_reward": -11.861999999999991,
+    "first_success": 0,
+    "total_successes": 6,
+    "path_type_counts": {
+      "trap_rush": 3,
+      "timeout": 14,
+      "shield_route": 3
+    },
+    "avg_shield_pickup_step": 19.0,
+    "avg_trap_hit_step": 45.8,
+    "avg_door_attempts_without_key": 0.0
+  }
+}
