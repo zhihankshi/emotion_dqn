@@ -76,8 +76,8 @@ traps: []
 
 rewards:
   step: -0.5
-  trap_no_shield: -50.0
-  trap_with_shield: -50.0   # was -1.0 on shield_trap — shield no longer protects
+  trap_no_shield: -5.0
+  trap_with_shield: -5.0   # was -5.0 on shield_trap — shield no longer protects
   goal: 5
   shield_pickup: 0          # was +5 on shield_trap — pickup is worthless, not punished
   wall_bump: -0.5
