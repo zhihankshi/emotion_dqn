@@ -77,7 +77,7 @@ traps: []
 rewards:
   step: -0.5
   trap_no_shield: -50.0
-  trap_with_shield: -1.0
+  trap_with_shield: -5.0
   goal: 5
   shield_pickup: 5
   wall_bump: -0.5
