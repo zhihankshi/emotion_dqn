@@ -841,6 +841,65 @@ def test_shield_trap_terminal_rewards():
     return True
 
 
+def test_reversal_contingencies():
+    """Reversal pair differs in exactly one reward key and is pixel-identical.
+
+    The whole reversal experiment rests on this: if the two contingencies look
+    different, the CNN can see the switch coming and no conclusion about an
+    internal mood signal survives.
+    """
+    print("\n" + "="*50)
+    print("TEST: Reversal Contingencies")
+    print("="*50)
+
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts.train_reversal import (
+        contingency_overrides, verify_visual_identity, PROTECTIVE, NON_PROTECTIVE,
+    )
+
+    for maze_name in ("shield_trap", "shield_trap_easy"):
+        overrides = contingency_overrides(maze_name)
+
+        differing = {
+            key for key in set(overrides[PROTECTIVE]) | set(overrides[NON_PROTECTIVE])
+            if overrides[PROTECTIVE].get(key) != overrides[NON_PROTECTIVE].get(key)
+        }
+        assert differing == {"trap_with_shield"}, (
+            f"{maze_name}: contingencies must differ in trap_with_shield alone, "
+            f"got {differing}"
+        )
+
+        envs = {
+            name: VisualMazeEnv(
+                maze_name=maze_name, image_size=64, reward_overrides=overrides[name]
+            )
+            for name in (PROTECTIVE, NON_PROTECTIVE)
+        }
+        identical, differences = verify_visual_identity(
+            envs[PROTECTIVE], envs[NON_PROTECTIVE], verbose=False
+        )
+        assert identical, (
+            f"{maze_name}: contingencies are visually distinguishable — "
+            f"{differences[0] if differences else ''}"
+        )
+
+        # Under non_protective the shield must buy nothing at the trap.
+        assert (
+            overrides[NON_PROTECTIVE]["trap_with_shield"]
+            == envs[NON_PROTECTIVE].rewards["trap_no_shield"]
+        ), f"{maze_name}: non_protective trap cost should equal the unshielded cost"
+
+        print(f"  {maze_name}: trap_with_shield "
+              f"{overrides[PROTECTIVE]['trap_with_shield']} -> "
+              f"{overrides[NON_PROTECTIVE]['trap_with_shield']}, "
+              f"pixel-identical in all states")
+
+    print("✓ Reversal contingencies configured correctly!")
+    return True
+
+
 def run_all_tests():
     """Run all sanity checks."""
     print("\n" + "="*60)
@@ -867,6 +926,7 @@ def run_all_tests():
         test_shield_trap_v2_rewards,
         test_shield_trap_easy_rewards,
         test_shield_trap_terminal_rewards,
+        test_reversal_contingencies,
     ]
     
     passed = 0

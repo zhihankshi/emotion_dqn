@@ -65,6 +65,9 @@ Windows, virtualenv at `.venv`. Run scripts with `.venv\Scripts\python.exe` (or 
 # Two-phase transfer: train on source maze, reload final checkpoint, continue on target
 .venv\Scripts\python.exe scripts/train_transfer.py --source_maze shield_avoidance --target_maze shield_trap
 
+# Repeated contingency reversal (the decisive experiment; supersedes train_transfer.py)
+.venv\Scripts\python.exe scripts/train_reversal.py --maze shield_trap --agent emotional --reversals 8 --reversal_period 150
+
 # Plots
 .venv\Scripts\python.exe visualize_results.py
 .venv\Scripts\python.exe visualize_transfer.py
@@ -116,6 +119,18 @@ net cannot consume tiny images. `--double_dqn` is available on both agents.
 `checkpoint_manifest.json`, greedy per-checkpoint evaluations, and comparison JSON/PNG.
 `--reward key=value` (repeatable), `--max_steps`, and `--shield_lights_up` override maze YAML at
 runtime, which is the intended way to sweep reward shaping without editing the YAML.
+
+**`scripts/train_reversal.py`** — repeated contingency reversal, the decisive experiment. One
+agent for the whole run (buffer, optimizer, target net and mood persist across every boundary);
+Phase A trains to a competence criterion, then Phase B flips the contingency every `K` episodes
+`R` times. Both contingencies come from the *same maze YAML* with one key changed
+(`trap_with_shield` = authored value vs `trap_no_shield`), and startup renders every reachable
+state under both to assert pixel identity — a visible cue would let the CNN detect the switch.
+**Do not "fix" any of these:** ε is never bumped at a reversal (constant floor through Phase B),
+the buffer is never flushed, the target net is never reset, mood is never reset. The buffer is
+small (12k) so it turns over within ~one reversal period; the run prints the measured
+steps/episode and warns if it spans more than 1.5 periods. `shield_trap` vs `shield_avoidance`
+is *not* a valid reversal pair — those differ in `trap_no_shield` and `shield_pickup` too.
 
 **`utils/metrics.py`** — `EpisodeMetrics` → `MetricsLogger` (per-run CSV, streamed per episode) →
 `ExperimentLogger` (cross-run aggregation). Downstream plotting in `utils/visualization.py` reads
