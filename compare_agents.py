@@ -4,15 +4,30 @@ Runs multiple training runs and compares performance.
 Saves policy checkpoints during training for later analysis.
 """
 import argparse
+import csv
+import itertools
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Sequence, Tuple
 from tqdm import tqdm
+
+import numpy as np
 
 from train import train, get_checkpoint_episodes, resolve_network_class
 from agents import SmallDQNNetwork
 from utils import ExperimentLogger
+from utils.reversal_analysis import bootstrap_ci, cohens_d_between
+
+# Sweep grids from the implementation brief. eta runs low because the theory
+# predicts mood matters most at low eta: at eta=0.9 the mood term carries only
+# (1 - 0.9) = 10% of the target, the minimum-mood setting of the range.
+DEFAULT_ETA_GRID = (0.1, 0.3, 0.5, 0.7, 0.9)
+DEFAULT_LAMBDA_GRID = (0.5, 0.8, 0.95)
+# Baseline learning rates spanning a comparable range of effective step size.
+# Without this arm, an emotional win cannot be distinguished from a step-size
+# change wearing a costume.
+DEFAULT_LR_GRID = (3e-5, 1e-4, 3e-4)
 
 
 def _parse_reward_overrides(pairs: Optional[List[str]]) -> Dict[str, float]:
@@ -30,6 +45,267 @@ def _parse_reward_overrides(pairs: Optional[List[str]]) -> Dict[str, float]:
             raise ValueError(f"Invalid --reward '{raw}'. Empty key.")
         out[k] = float(v)
     return out
+
+
+def _parse_sweep_spec(items: Optional[List[str]]) -> Dict[str, List[float]]:
+    """Parse repeated --sweep key=v1,v2,v3 into {key: [values]}."""
+    out: Dict[str, List[float]] = {}
+    for raw in items or []:
+        if "=" not in raw:
+            raise ValueError(f"Invalid --sweep '{raw}'. Use key=v1,v2,v3.")
+        key, values = raw.split("=", 1)
+        out[key.strip()] = [float(v) for v in values.split(",") if v.strip()]
+    return out
+
+
+def build_sweep_conditions(
+    agent_types: Sequence[str],
+    emotional_grid: Dict[str, List[float]],
+    baseline_grid: Dict[str, List[float]],
+) -> List[Dict[str, Any]]:
+    """Cross-product conditions, per agent type.
+
+    Emotional/yoked arms sweep the mood parameters; the baseline arm sweeps
+    learning rate. Sweeping only the emotional side would leave any emotional
+    advantage indistinguishable from a change in effective step size.
+    """
+    conditions: List[Dict[str, Any]] = []
+    for agent_type in agent_types:
+        grid = baseline_grid if agent_type == "baseline" else emotional_grid
+        if not grid:
+            conditions.append({"agent_type": agent_type, "params": {}})
+            continue
+        keys = sorted(grid)
+        for combo in itertools.product(*(grid[k] for k in keys)):
+            conditions.append({
+                "agent_type": agent_type,
+                "params": dict(zip(keys, combo)),
+            })
+    return conditions
+
+
+def condition_label(condition: Dict[str, Any]) -> str:
+    params = condition["params"]
+    if not params:
+        return condition["agent_type"]
+    body = ",".join(f"{k}={v:g}" for k, v in sorted(params.items()))
+    return f"{condition['agent_type']}[{body}]"
+
+
+def _run_metrics_for_seed(logger, last_n: int) -> Dict[str, float]:
+    """Per-seed outcome measures, taken over the final `last_n` episodes."""
+    episodes = logger.episodes[-last_n:] if logger.episodes else []
+    if not episodes:
+        return {}
+    path_counts: Dict[str, int] = {}
+    for e in episodes:
+        path_counts[e.path_type] = path_counts.get(e.path_type, 0) + 1
+    return {
+        "success_rate": float(np.mean([e.success for e in episodes])),
+        "mean_return": float(np.mean([e.total_reward for e in episodes])),
+        "mean_steps": float(np.mean([e.steps for e in episodes])),
+        "shield_route_rate": path_counts.get("shield_route", 0) / len(episodes),
+        "mean_mood": float(np.mean([e.mean_overall_mood for e in episodes])),
+        "mood_clip_fraction": float(np.mean([e.mood_clip_fraction for e in episodes])),
+        "first_success": logger.get_first_success_episode(),
+    }
+
+
+def run_sweep(
+    maze_name: str = "shield_trap",
+    agent_types: Optional[List[str]] = None,
+    emotional_grid: Optional[Dict[str, List[float]]] = None,
+    baseline_grid: Optional[Dict[str, List[float]]] = None,
+    n_seeds: int = 20,
+    base_seed: int = 42,
+    n_episodes: int = 800,
+    last_n: int = 100,
+    reference: Optional[str] = None,
+    log_dir: str = "experiments",
+    device: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+    image_size: int = 64,
+    network_class=None,
+    frame_stack: int = 1,
+    reward_overrides: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
+    shield_lights_up: Optional[bool] = None,
+    metric: str = "success_rate",
+    verbose: bool = True,
+) -> Dict[str, Any]:
+    """Hyperparameter sweep with per-seed variance and effect sizes.
+
+    Deep RL seed variance is large enough that 3-5 seeds cannot detect a small
+    effect, so the default is 20 seeds per condition and every per-seed value
+    is kept in the output rather than only the mean. Comparisons report effect
+    size with a bootstrap CI; significance stars are deliberately absent.
+    """
+    agent_types = agent_types or ["baseline", "emotional"]
+    emotional_grid = emotional_grid or {
+        "eta": list(DEFAULT_ETA_GRID),
+        "lambda_mood": list(DEFAULT_LAMBDA_GRID),
+    }
+    baseline_grid = baseline_grid or {"learning_rate": list(DEFAULT_LR_GRID)}
+    config = dict(config or {})
+
+    conditions = build_sweep_conditions(agent_types, emotional_grid, baseline_grid)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sweep_dir = Path(log_dir) / f"sweep_{maze_name}_{timestamp}"
+    sweep_dir.mkdir(parents=True, exist_ok=True)
+
+    total = len(conditions) * n_seeds
+    if verbose:
+        print("=" * 72)
+        print(f"SWEEP: {maze_name}")
+        print("=" * 72)
+        print(f"  Conditions: {len(conditions)}  x  {n_seeds} seeds  =  {total} runs")
+        for c in conditions:
+            print(f"    {condition_label(c)}")
+        print(f"  Episodes per run: {n_episodes} (metrics over last {last_n})")
+        print(f"  Output: {sweep_dir}")
+        print("=" * 72, flush=True)
+
+    rows: List[Dict[str, Any]] = []
+    pbar = tqdm(total=total, desc="sweep", colour="green")
+
+    for condition in conditions:
+        label = condition_label(condition)
+        for i in range(n_seeds):
+            seed = base_seed + i * 100
+            run_config = {**config, **condition["params"]}
+            logger = train(
+                maze_name=maze_name,
+                agent_type=condition["agent_type"],
+                n_episodes=n_episodes,
+                seed=seed,
+                log_dir=str(sweep_dir / label.replace("/", "_")),
+                run_id=i,
+                device=device,
+                config=run_config,
+                verbose=False,
+                show_tqdm=False,
+                checkpoint_interval=max(n_episodes, 10 ** 9),
+                image_size=image_size,
+                network_class=network_class,
+                frame_stack=frame_stack,
+                reward_overrides=reward_overrides,
+                max_steps=max_steps,
+                shield_lights_up=shield_lights_up,
+            )
+            rows.append({
+                "condition": label,
+                "agent_type": condition["agent_type"],
+                **{f"param_{k}": v for k, v in condition["params"].items()},
+                "seed": seed,
+                **_run_metrics_for_seed(logger, last_n),
+            })
+            pbar.update(1)
+            _write_sweep_outputs(sweep_dir, rows, conditions, metric, reference)
+    pbar.close()
+
+    summary = _write_sweep_outputs(sweep_dir, rows, conditions, metric, reference)
+    if verbose:
+        print_sweep_report(summary, metric)
+    return summary
+
+
+def summarize_sweep(
+    rows: Sequence[Dict[str, Any]],
+    metric: str = "success_rate",
+    reference: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Per-condition mean, per-seed variance, CI, and effect size vs reference."""
+    labels = sorted({r["condition"] for r in rows})
+    per_condition: Dict[str, Any] = {}
+    for label in labels:
+        values = [r[metric] for r in rows if r["condition"] == label and metric in r]
+        per_condition[label] = {
+            "n_seeds": len(values),
+            "mean": float(np.mean(values)) if values else None,
+            "sd": float(np.std(values, ddof=1)) if len(values) > 1 else None,
+            "ci95": bootstrap_ci(values),
+            "min": float(np.min(values)) if values else None,
+            "max": float(np.max(values)) if values else None,
+            "per_seed": values,
+        }
+
+    # Default reference: the plain baseline at its default learning rate if
+    # present, else the first condition.
+    if reference is None:
+        default_lr = f"baseline[learning_rate={1e-4:g}]"
+        reference = default_lr if default_lr in per_condition else labels[0]
+
+    ref_values = per_condition.get(reference, {}).get("per_seed", [])
+    contrasts = {}
+    for label in labels:
+        if label == reference:
+            continue
+        values = per_condition[label]["per_seed"]
+        diff = (float(np.mean(values) - np.mean(ref_values))
+                if values and ref_values else None)
+        contrasts[label] = {
+            "vs": reference,
+            "mean_difference": diff,
+            "cohens_d": cohens_d_between(values, ref_values),
+        }
+
+    return {
+        "metric": metric,
+        "reference": reference,
+        "per_condition": per_condition,
+        "contrasts": contrasts,
+        "n_rows": len(rows),
+    }
+
+
+def _write_sweep_outputs(
+    sweep_dir: Path,
+    rows: List[Dict[str, Any]],
+    conditions: List[Dict[str, Any]],
+    metric: str,
+    reference: Optional[str],
+) -> Dict[str, Any]:
+    """Write per-seed CSV and summary JSON after every run, so a long sweep is
+    readable while it is still going and survives interruption."""
+    summary = summarize_sweep(rows, metric, reference)
+    summary["conditions"] = [condition_label(c) for c in conditions]
+    with open(sweep_dir / "sweep_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    fieldnames = sorted({k for r in rows for k in r})
+    with open(sweep_dir / "sweep_runs.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    summary["sweep_dir"] = str(sweep_dir)
+    return summary
+
+
+def print_sweep_report(summary: Dict[str, Any], metric: str) -> None:
+    print("\n" + "=" * 78)
+    print(f"SWEEP RESULTS — metric: {metric}   reference: {summary['reference']}")
+    print("=" * 78)
+    print(f"  {'condition':<34}{'n':>4}{'mean':>9}{'sd':>8}{'95% CI':>20}{'d':>7}")
+    print("  " + "-" * 74)
+    for label, stats in summary["per_condition"].items():
+        ci = stats["ci95"]
+        ci_s = (f"[{ci[0]:.3f}, {ci[1]:.3f}]"
+                if ci and not np.isnan(ci[0]) else "--")
+        if label == summary["reference"]:
+            d_s = "ref"
+        else:
+            d = summary["contrasts"].get(label, {}).get("cohens_d")
+            # nan means undefined (too few seeds, or zero variance in both
+            # groups) — not "this is the reference".
+            d_s = f"{d:+.2f}" if d is not None and not np.isnan(d) else "--"
+        print(f"  {label:<34}{stats['n_seeds']:>4}"
+              f"{(stats['mean'] if stats['mean'] is not None else float('nan')):>9.3f}"
+              f"{(stats['sd'] if stats['sd'] is not None else float('nan')):>8.3f}"
+              f"{ci_s:>20}{d_s:>7}")
+    print("\n  Effect sizes are Cohen's d over per-seed values against the "
+          "reference condition.")
+    print("  Per-seed values are in sweep_runs.csv — report the spread, not just "
+          "the means.")
+    print("=" * 78)
 
 
 def get_run_checkpoint_dir(run_log_dir: Path) -> Path:
@@ -691,6 +967,23 @@ def main():
                         help="Which delta feeds the mood (see EmotionalDQNAgent docstring)")
     parser.add_argument("--mood_delta_unsigned", action="store_true",
                         help="Integrate |delta| (arousal) instead of signed delta (valence)")
+    parser.add_argument("--sweep_mode", action="store_true",
+                        help="Run a hyperparameter sweep instead of a comparison")
+    parser.add_argument("--sweep", action="append", default=None,
+                        help="Emotional-arm grid, repeatable: --sweep eta=0.1,0.3,0.5,0.7,0.9 "
+                             "--sweep lambda_mood=0.5,0.8,0.95 (default: both)")
+    parser.add_argument("--sweep_baseline", action="append", default=None,
+                        help="Baseline-arm grid, repeatable: "
+                             "--sweep_baseline learning_rate=3e-5,1e-4,3e-4")
+    parser.add_argument("--sweep_seeds", type=int, default=20,
+                        help="Seeds per condition (>=20; deep RL seed variance is "
+                             "too large for 3-5 to detect a small effect)")
+    parser.add_argument("--sweep_metric", type=str, default="success_rate",
+                        help="Per-seed outcome to summarize")
+    parser.add_argument("--sweep_last_n", type=int, default=100,
+                        help="Episodes at the end of each run used for the metric")
+    parser.add_argument("--sweep_reference", type=str, default=None,
+                        help="Condition label used as the contrast reference")
     parser.add_argument("--agents", type=str, default="baseline,emotional",
                         help="Comma-separated agent types to run, in order. Use "
                              "'baseline,emotional,yoked' for the three-way "
@@ -760,7 +1053,29 @@ def main():
 
     network_class = resolve_network_class(args.network_size, args.image_size)
 
-    if args.quick_test:
+    if args.sweep_mode:
+        run_sweep(
+            maze_name=args.maze,
+            agent_types=agent_types,
+            emotional_grid=_parse_sweep_spec(args.sweep) or None,
+            baseline_grid=_parse_sweep_spec(args.sweep_baseline) or None,
+            n_seeds=args.sweep_seeds,
+            base_seed=args.seed,
+            n_episodes=args.episodes,
+            last_n=args.sweep_last_n,
+            reference=args.sweep_reference,
+            log_dir=args.log_dir,
+            device=args.device,
+            config=config,
+            image_size=args.image_size,
+            network_class=network_class,
+            frame_stack=args.frame_stack,
+            reward_overrides=reward_overrides,
+            max_steps=args.max_steps,
+            shield_lights_up=args.shield_lights_up,
+            metric=args.sweep_metric,
+        )
+    elif args.quick_test:
         quick_test(
             maze_name=args.maze,
             n_episodes=args.episodes,
