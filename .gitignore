@@ -21,3 +21,6 @@ venv/
 # Model checkpoints anywhere
 *.pt
 *.pth
+
+# Study driver logs
+*.log
