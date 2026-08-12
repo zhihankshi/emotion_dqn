@@ -45,6 +45,21 @@ def resolve_network_class(network_size: str, image_size: int):
     return None
 
 
+def resolve_mood_bounds(config: Dict[str, Any]) -> tuple:
+    """Mood clip bounds: explicit ``mood_bounds`` wins, else ±``mood_clip_range``.
+
+    The clip has no theoretical scale of its own, so it only means something
+    relative to the reward scale. Unscaled maze rewards span roughly ±55
+    (trap −50, timeout −50) while the default clip is ±1, so M saturates on
+    exactly the events the theory cares about most. Use ``reward_scale`` to
+    bring rewards into the mood's range, or widen ``mood_clip_range``.
+    """
+    if 'mood_bounds' in config and config['mood_bounds'] is not None:
+        return tuple(config['mood_bounds'])
+    clip = float(config.get('mood_clip_range', 1.0))
+    return (-clip, clip)
+
+
 def create_agent(
     agent_type: str,
     observation_shape: tuple,
@@ -79,7 +94,9 @@ def create_agent(
     elif agent_type == 'emotional':
         emotional_params = {
             'lambda_mood': config.get('lambda_mood', 0.8),
-            'mood_bounds': tuple(config.get('mood_bounds', (-1.0, 1.0))),
+            'mood_bounds': resolve_mood_bounds(config),
+            'delta_source': config.get('mood_delta_source', 'batch_sequential'),
+            'delta_signed': config.get('mood_delta_signed', True),
         }
         return EmotionalDQNAgent(**common_params, **emotional_params)
     
@@ -90,9 +107,17 @@ def train_episode(
     env,
     agent,
     episode_num: int,
-    training: bool = True
+    training: bool = True,
+    reward_scale: float = 1.0,
 ) -> EpisodeMetrics:
-    """Run a single training episode."""
+    """Run a single training episode.
+
+    reward_scale multiplies the reward handed to the agent (and therefore δ,
+    the loss, and the mood signal). It is applied identically for every agent
+    type, so the baseline/emotional/yoked comparison stays matched. Logged
+    returns stay in raw environment units so results remain comparable across
+    scales. Default 1.0 = current behavior.
+    """
     obs, info = env.reset()
     
     metrics = EpisodeMetrics(episode=episode_num)
@@ -140,7 +165,7 @@ def train_episode(
             # considers actions the agent could actually take there
             next_valid_actions = env.get_valid_actions()
             update_metrics = agent.step(
-                obs, action, reward, next_obs, done,
+                obs, action, reward * reward_scale, next_obs, done,
                 next_valid_actions=next_valid_actions,
             )
             
@@ -258,8 +283,18 @@ def train(
 
     epsilon_start = config.get('epsilon_start', 1.0)
     epsilon_end = config.get('epsilon_end', 0.05)
+    reward_scale = float(config.get('reward_scale', 1.0))
 
     if verbose:
+        if reward_scale != 1.0:
+            print(f"  Reward scale: x{reward_scale} (applied to all agent types)")
+        if agent_type == 'emotional':
+            print(
+                f"  Mood: delta_source={config.get('mood_delta_source', 'batch_sequential')}"
+                f" signed={config.get('mood_delta_signed', True)}"
+                f" bounds={resolve_mood_bounds(config)}"
+                f" lambda={config.get('lambda_mood', 0.8)}"
+            )
         print(f"  Observation shape: {env.observation_space.shape}")
         print(f"  Action space: {env.action_space.n}")
         print(
@@ -330,7 +365,9 @@ def train(
         agent.update_epsilon_for_episode(episode, n_episodes)
 
         # Train one episode
-        metrics = train_episode(env, agent, episode, training=True)
+        metrics = train_episode(
+            env, agent, episode, training=True, reward_scale=reward_scale
+        )
         
         # Log
         logger.log_episode(metrics)
@@ -441,13 +478,31 @@ def main():
                        help='Mood persistence (0-1, higher = slower change)')
     parser.add_argument('--eta', type=float, default=0.9,
                        help='η in Q_target = Q + ηδ; shared by baseline and emotional agents')
-    parser.add_argument('--mood_min', type=float, default=-1.0,
-                       help='Lower bound for clipped mood')
-    parser.add_argument('--mood_max', type=float, default=1.0,
-                       help='Upper bound for clipped mood')
-    
+    parser.add_argument('--mood_min', type=float, default=None,
+                       help='Lower bound for clipped mood (overrides --mood_clip_range)')
+    parser.add_argument('--mood_max', type=float, default=None,
+                       help='Upper bound for clipped mood (overrides --mood_clip_range)')
+    parser.add_argument('--mood_clip_range', type=float, default=1.0,
+                       help='Symmetric mood clip +/-C. Only meaningful relative to '
+                            'the reward scale: raw maze rewards span ~+/-55')
+    parser.add_argument('--mood_delta_source', type=str, default='batch_sequential',
+                       choices=['online', 'batch_mean', 'batch_sequential'],
+                       help="Which delta feeds the mood. 'online' = experienced "
+                            "transition per env step (theory-faithful); "
+                            "'batch_mean' = mean batch delta per gradient step; "
+                            "'batch_sequential' = one update per batch element "
+                            "(default, historical; needs lambda ~0.993 to behave "
+                            "like an intended lambda of 0.8 at batch_size=32)")
+    parser.add_argument('--mood_delta_unsigned', action='store_true',
+                       help='Integrate |delta| (arousal) instead of signed delta (valence)')
+
+    # Reward scaling (applies to all agent types)
+    parser.add_argument('--reward_scale', type=float, default=1.0,
+                       help='Multiply rewards fed to the agent. Applied identically '
+                            'to every agent type; logged returns stay unscaled')
+
     args = parser.parse_args()
-    
+
     config = {
         'learning_rate': args.lr,
         'gamma': args.gamma,
@@ -455,11 +510,19 @@ def main():
         'batch_size': args.batch_size,
         'lambda_mood': args.lambda_mood,
         'eta': args.eta,
-        'mood_bounds': (args.mood_min, args.mood_max),
+        'mood_clip_range': args.mood_clip_range,
+        'mood_delta_source': args.mood_delta_source,
+        'mood_delta_signed': not args.mood_delta_unsigned,
+        'reward_scale': args.reward_scale,
         'double_dqn': args.double_dqn,
         'epsilon_end': args.epsilon_end,
         'target_update_freq': args.target_update_freq,
     }
+    if args.mood_min is not None or args.mood_max is not None:
+        config['mood_bounds'] = (
+            args.mood_min if args.mood_min is not None else -args.mood_clip_range,
+            args.mood_max if args.mood_max is not None else args.mood_clip_range,
+        )
     
     network_class = resolve_network_class(args.network_size, args.image_size)
     

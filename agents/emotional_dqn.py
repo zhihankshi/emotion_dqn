@@ -3,6 +3,11 @@ Emotional Deep Q-Network Agent.
 
 Paper mood (eq. 3.3.2):
     M_{t+1} = M_t + (1 - λ) * (η * δ_t - M_t)
+            = λ * M_t + (1 - λ) * η * δ_t
+
+so λ is the **retention per mood update**, and the half-life of M is measured
+in mood updates — not in environment steps or gradient steps. How many mood
+updates happen per gradient step is set by ``delta_source``.
 
 Q-target (grad student / paper learning rule):
     Q_target = Q + η * δ + (1 - η) * M
@@ -20,38 +25,71 @@ from .dqn import DQNNetwork, masked_action_selection
 from .replay_buffer import ReplayBuffer
 
 
+DELTA_SOURCES = ("online", "batch_mean", "batch_sequential")
+
+
 class MoodTracker:
     """
     Cumulative emotional state as discounted sum of value changes (paper §3.3).
 
     Recursive form (eq. 3.3.2):
         M_{t+1} = M_t + (1 - λ) * (η * δ_t - M_t)
+
+    Equivalently M_{t+1} = λ·M_t + (1 - λ)·η·δ_t, so **λ is the retention per
+    update**: after n updates the contribution of the old M is scaled by λ^n.
+    This matters for how often ``update`` is called — see ``delta_source`` on
+    :class:`EmotionalDQNAgent`.
+
+    Args:
+        lambda_mood: retention λ per mood update.
+        mood_bounds: clip range for M. Note the theory has no natural scale
+            here; with unscaled maze rewards spanning ±55 a ±1 clip is a hard
+            constraint, not a formality (see ``reward_scale`` in ``train.py``).
+        signed: True → M integrates signed δ (valence-like, the theory's
+            intent). False → M integrates |δ| (surprise/arousal-like).
     """
 
     def __init__(
         self,
         lambda_mood: float = 0.8,
         mood_bounds: Tuple[float, float] = (-1.0, 1.0),
+        signed: bool = True,
     ):
         self.lambda_mood = lambda_mood
         self.mood_bounds = mood_bounds
+        self.signed = signed
         self.mood = 0.0
+        # Diagnostics: how often the clip actually binds.
+        self.n_updates = 0
+        self.n_clipped = 0
 
     def update(self, td_error: float, eta: float) -> float:
         """One timestep of mood accumulation from TD error δ_t."""
-        value_change = eta * td_error
-        self.mood = self.mood + (1 - self.lambda_mood) * (value_change - self.mood)
-        self.mood = float(np.clip(self.mood, self.mood_bounds[0], self.mood_bounds[1]))
+        delta = td_error if self.signed else abs(td_error)
+        value_change = eta * delta
+        raw = self.mood + (1 - self.lambda_mood) * (value_change - self.mood)
+        self.n_updates += 1
+        if raw < self.mood_bounds[0] or raw > self.mood_bounds[1]:
+            self.n_clipped += 1
+        self.mood = float(np.clip(raw, self.mood_bounds[0], self.mood_bounds[1]))
         return self.mood
 
     def update_batch(self, td_errors: np.ndarray, eta: float) -> float:
-        """Apply sequential per-timestep updates for each δ in a replay batch."""
+        """Apply sequential per-timestep updates for each δ in a replay batch.
+
+        Applies ``len(td_errors)`` updates, so the *effective* retention over
+        one gradient step is λ^batch_size. See ``delta_source='batch_sequential'``.
+        """
         for td_error in td_errors:
             self.update(float(td_error), eta)
         return self.mood
 
     def get_mood(self) -> float:
         return self.mood
+
+    def clip_fraction(self) -> float:
+        """Fraction of mood updates whose pre-clip value left the bounds."""
+        return self.n_clipped / self.n_updates if self.n_updates else 0.0
 
     def reset(self) -> None:
         self.mood = 0.0
@@ -65,6 +103,36 @@ class EmotionalDQNAgent:
         Q_target = Q + η * δ + (1 - η) * M    (eq. 3.4.1)
 
     Baseline uses the same η with M = 0 (eq. 3.1.3).
+
+    **Which δ feeds the mood** is an experimental variable, not an
+    implementation detail (``delta_source``):
+
+    ``online``
+        One mood update per environment step, from the TD error of the
+        transition the agent just experienced, evaluated with the networks as
+        they stood at that moment. This is the theory-faithful option:
+        Emanuel & Eldar's mood integrates the agent's *own* value updates in
+        temporal order, so M inherits the autocorrelation of experience and
+        can act as an internal signal that the world has changed.
+
+    ``batch_mean``
+        One mood update per gradient step, using the mean δ of the sampled
+        replay batch. Same update cadence as ``online`` but off-policy and
+        temporally scrambled: the mean smooths over 32 unrelated transitions.
+
+    ``batch_sequential`` (default — preserves historical behavior)
+        One mood update per element of the sampled replay batch, i.e.
+        ``batch_size`` updates per gradient step, in replay-sample order.
+        Because retention is λ per update, the effective retention across a
+        single gradient step is λ^batch_size: at λ=0.8, batch_size=32 that is
+        0.8^32 ≈ 8e-4, so M is essentially rebuilt from the current batch each
+        gradient step and carries almost no history. To approximate an
+        *intended* per-gradient-step retention of 0.8 under this mode, λ must
+        be raised to 0.8^(1/32) ≈ 0.993. Runs using this mode with λ=0.8 are
+        not testing a slow-moving mood.
+
+    ``delta_signed`` selects valence (signed δ, the theory's intent) versus
+    surprise/arousal (|δ|).
     """
 
     def __init__(
@@ -83,6 +151,8 @@ class EmotionalDQNAgent:
         lambda_mood: float = 0.8,
         eta: float = 0.9,
         mood_bounds: Tuple[float, float] = (-1.0, 1.0),
+        delta_source: str = "batch_sequential",
+        delta_signed: bool = True,
         # Other
         device: Optional[str] = None,
         seed: Optional[int] = None,
@@ -97,8 +167,17 @@ class EmotionalDQNAgent:
                  0.9 = 90% TD error, 10% mood
                  1.0 = pure TD learning (standard DQN)
                  0.5 = equal weight
+                 Note η=0.9 is the *minimum-mood* setting of the usual sweep;
+                 the theory predicts mood matters most at low η.
+            delta_source: 'online' | 'batch_mean' | 'batch_sequential'.
+                 See the class docstring — this changes what the mood is.
+            delta_signed: True = valence (signed δ), False = arousal (|δ|).
             network_class: Network class to use (default: DQNNetwork)
         """
+        if delta_source not in DELTA_SOURCES:
+            raise ValueError(
+                f"delta_source must be one of {DELTA_SOURCES}, got {delta_source!r}"
+            )
         self.observation_shape = observation_shape
         self.n_actions = n_actions
         self.gamma = gamma
@@ -138,11 +217,17 @@ class EmotionalDQNAgent:
         self.replay_buffer = ReplayBuffer(capacity=buffer_size, seed=seed)
 
         # Mood tracker
+        self.delta_source = delta_source
+        self.delta_signed = delta_signed
         self.mood_tracker = MoodTracker(
             lambda_mood=lambda_mood,
             mood_bounds=mood_bounds,
+            signed=delta_signed,
         )
         self.mood_bounds = mood_bounds
+        # delta_source='online': δ of the transition just experienced, computed
+        # in step() with the pre-update networks and consumed by update().
+        self._pending_online_delta: Optional[float] = None
 
         # Counters
         self.steps = 0
@@ -268,10 +353,22 @@ class EmotionalDQNAgent:
         torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
         self.optimizer.step()
 
-        current_mood = self.mood_tracker.update_batch(
-            td_error_batch.detach().cpu().numpy(),
-            self.eta,
-        )
+        # Accumulate mood from the configured δ source (see class docstring).
+        if self.delta_source == "batch_sequential":
+            current_mood = self.mood_tracker.update_batch(
+                td_error_batch.detach().cpu().numpy(),
+                self.eta,
+            )
+        elif self.delta_source == "batch_mean":
+            current_mood = self.mood_tracker.update(td_error, self.eta)
+        else:  # 'online' — δ comes from step(), one update per env step
+            if self._pending_online_delta is not None:
+                current_mood = self.mood_tracker.update(
+                    self._pending_online_delta, self.eta
+                )
+                self._pending_online_delta = None
+            else:
+                current_mood = self.mood_tracker.get_mood()
 
         self.updates += 1
 
@@ -285,8 +382,52 @@ class EmotionalDQNAgent:
             'mood': current_mood,
             'mood_component': mood_component,
             'td_component': td_component.mean().item(),
+            'mood_clip_fraction': self.mood_tracker.clip_fraction(),
             'eta': self.eta,
         }
+
+    def _compute_online_delta(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        next_valid_actions: Optional[Sequence[int]] = None,
+    ) -> float:
+        """TD error of the transition just experienced, with the current nets.
+
+        Uses the same bootstrap rule as ``update`` (action masking, and Double
+        DQN when enabled) so the online δ is the same quantity as the batch δ,
+        differing only in *which* transition it describes.
+        """
+        with torch.no_grad():
+            state_t = torch.from_numpy(state).unsqueeze(0).to(self.device)
+            next_state_t = torch.from_numpy(next_state).unsqueeze(0).to(self.device)
+
+            current_q = self.policy_net(state_t)[0, action]
+
+            mask = torch.zeros(1, self.n_actions, dtype=torch.bool, device=self.device)
+            if next_valid_actions is None or len(next_valid_actions) == 0:
+                invalid = mask  # all False → nothing masked out
+            else:
+                mask[0, list(next_valid_actions)] = True
+                invalid = ~mask
+
+            if self.double_dqn:
+                next_action = (
+                    self.policy_net(next_state_t).masked_fill(invalid, -1e9).argmax(dim=1)
+                )
+                next_q = self.target_net(next_state_t).gather(
+                    1, next_action.unsqueeze(1)
+                ).squeeze(1)
+            else:
+                next_q = self.target_net(next_state_t).masked_fill(
+                    invalid, -1e9
+                ).max(dim=1)[0]
+
+            target = reward + self.gamma * next_q.item() * (0.0 if done else 1.0)
+            return float(target - current_q.item())
 
     def step(
         self,
@@ -300,7 +441,22 @@ class EmotionalDQNAgent:
         """Complete step: store transition and update network."""
         self.steps += 1
         self.store_transition(state, action, reward, next_state, done, next_valid_actions)
+
+        if self.delta_source == "online":
+            # Evaluated with the pre-update networks: δ_t is the prediction
+            # error at the moment of experience. update() consumes it *after*
+            # the gradient step, so the target still uses M_t (paper §3.3→§3.4).
+            self._pending_online_delta = self._compute_online_delta(
+                state, action, reward, next_state, done, next_valid_actions
+            )
+
         metrics = self.update()
+
+        if self._pending_online_delta is not None:
+            # Buffer not ready, so update() never ran — still integrate the
+            # experienced transition, keeping mood on the env-step clock.
+            self.mood_tracker.update(self._pending_online_delta, self.eta)
+            self._pending_online_delta = None
 
         if metrics:
             metrics['epsilon'] = self.epsilon
@@ -323,6 +479,9 @@ class EmotionalDQNAgent:
             'epsilon': self.epsilon,
             'buffer_size': len(self.replay_buffer),
             'mood': self.mood_tracker.get_mood(),
+            'mood_clip_fraction': self.mood_tracker.clip_fraction(),
+            'delta_source': self.delta_source,
+            'delta_signed': self.delta_signed,
             'eta': self.eta,
         }
 
@@ -340,6 +499,8 @@ class EmotionalDQNAgent:
             'mood': self.mood_tracker.get_mood(),
             'lambda_mood': self.mood_tracker.lambda_mood,
             'mood_bounds': self.mood_bounds,
+            'delta_source': self.delta_source,
+            'delta_signed': self.delta_signed,
             'eta': self.eta,
         }, path)
 
@@ -350,18 +511,31 @@ class EmotionalDQNAgent:
 
         torch.save({
             'policy_net': self.policy_net.state_dict(),
+            'target_net': self.target_net.state_dict(),
             'epsilon': self.epsilon,
             'episode': episode,
+            'eta': self.eta,
             'mood': self.mood_tracker.mood,
+            'mood_bounds': self.mood_bounds,
             'agent_type': 'emotional',
         }, path)
 
     def load_checkpoint(self, path: str) -> int:
-        """Load policy checkpoint. Returns the saved episode number."""
+        """Load policy checkpoint. Returns the saved episode number.
+
+        The target network is resynced to the loaded policy weights. Without
+        this it keeps its random construction-time init and the first
+        ``target_update_freq`` updates after a load bootstrap off noise.
+        """
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         self.policy_net.load_state_dict(checkpoint['policy_net'])
+        self.target_net.load_state_dict(
+            checkpoint.get('target_net', checkpoint['policy_net'])
+        )
+        self.target_net.eval()
         self.epsilon = checkpoint['epsilon']
+        self.eta = checkpoint.get('eta', self.eta)
         self.mood_tracker.mood = checkpoint.get('mood', 0.0)
         if 'mood_bounds' in checkpoint:
             self.mood_bounds = tuple(checkpoint['mood_bounds'])

@@ -391,16 +391,27 @@ class DQNAgent:
 
         torch.save({
             'policy_net': self.policy_net.state_dict(),
+            'target_net': self.target_net.state_dict(),
             'epsilon': self.epsilon,
             'episode': episode,
+            'eta': self.eta,
             'agent_type': 'baseline',
         }, path)
 
     def load_checkpoint(self, path: str) -> int:
-        """Load policy checkpoint. Returns the saved episode number."""
+        """Load policy checkpoint. Returns the saved episode number.
+
+        The target network is resynced to the loaded policy weights. Without
+        this it keeps its random construction-time init and the first
+        ``target_update_freq`` updates after a load bootstrap off noise.
+        """
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         self.policy_net.load_state_dict(checkpoint['policy_net'])
+        self.target_net.load_state_dict(
+            checkpoint.get('target_net', checkpoint['policy_net'])
+        )
+        self.target_net.eval()
         self.epsilon = checkpoint['epsilon']
         self.eta = checkpoint.get('eta', self.eta)
         return int(checkpoint['episode'])

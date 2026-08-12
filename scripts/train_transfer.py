@@ -71,7 +71,10 @@ def run_transfer_training(
         "batch_size": config.get("batch_size", 32),
         "lambda_mood": config.get("lambda_mood", 0.8),
         "eta": config.get("eta", 0.9),
-        "mood_bounds": tuple(config.get("mood_bounds", (-1.0, 1.0))),
+        "mood_clip_range": config.get("mood_clip_range", 1.0),
+        "mood_delta_source": config.get("mood_delta_source", "batch_sequential"),
+        "mood_delta_signed": config.get("mood_delta_signed", True),
+        "reward_scale": config.get("reward_scale", 1.0),
         "epsilon_start": 1.0,
         "epsilon_end": epsilon_end,
         "double_dqn": config.get("double_dqn", False),
@@ -139,7 +142,7 @@ def run_transfer_training(
         maze_name=target_maze,
         agent_type=agent_type,
         n_episodes=phase2_episodes,
-        seed=seed + 1,
+        seed=seed,
         log_dir=str(phase2_dir),
         device=device,
         config=phase2_config,
@@ -240,6 +243,13 @@ def main():
     parser.add_argument("--eta", type=float, default=0.9)
     parser.add_argument("--mood_min", type=float, default=-1.0)
     parser.add_argument("--mood_max", type=float, default=1.0)
+    parser.add_argument("--mood_delta_source", type=str, default="batch_sequential",
+                        choices=["online", "batch_mean", "batch_sequential"],
+                        help="Which delta feeds the mood (see EmotionalDQNAgent docstring)")
+    parser.add_argument("--mood_delta_unsigned", action="store_true",
+                        help="Integrate |delta| (arousal) instead of signed delta (valence)")
+    parser.add_argument("--reward_scale", type=float, default=1.0,
+                        help="Multiply rewards fed to the agent (all agent types)")
     parser.add_argument("--frame_stack", type=int, default=1,
                         help="Number of frames to stack in observations")
     parser.add_argument("--double_dqn", action="store_true",
@@ -259,6 +269,9 @@ def main():
         "lambda_mood": args.lambda_mood,
         "eta": args.eta,
         "mood_bounds": (args.mood_min, args.mood_max),
+        "mood_delta_source": args.mood_delta_source,
+        "mood_delta_signed": not args.mood_delta_unsigned,
+        "reward_scale": args.reward_scale,
         "double_dqn": args.double_dqn,
         "target_update_freq": args.target_update_freq,
     }
