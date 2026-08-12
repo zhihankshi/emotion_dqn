@@ -41,10 +41,10 @@ def test_environment_creation():
     print("="*50)
     
     env = VisualMazeEnv(maze_name="minimal", image_size=64)
-    
-    # Check spaces
+
+    # Check spaces. Observations are channel-first (3 * frame_stack, H, W).
     assert env.action_space.n == 4, f"Wrong action space: {env.action_space.n}"
-    assert env.observation_space.shape == (64, 64, 3), \
+    assert env.observation_space.shape == (3, 64, 64), \
         f"Wrong obs shape: {env.observation_space.shape}"
     assert env.observation_space.dtype == np.uint8, \
         f"Wrong obs dtype: {env.observation_space.dtype}"
@@ -66,8 +66,8 @@ def test_reset():
     
     obs, info = env.reset(seed=42)
     
-    # Check observation
-    assert obs.shape == (64, 64, 3), f"Wrong obs shape: {obs.shape}"
+    # Check observation (channel-first: 3 * frame_stack, H, W)
+    assert obs.shape == (3, 64, 64), f"Wrong obs shape: {obs.shape}"
     assert obs.dtype == np.uint8, f"Wrong obs dtype: {obs.dtype}"
     assert obs.min() >= 0 and obs.max() <= 255, "Obs values out of range"
     
@@ -99,7 +99,7 @@ def test_step():
     # Test move down (action=1)
     obs, reward, term, trunc, info = env.step(1)
     
-    assert obs.shape == (64, 64, 3), f"Wrong obs shape after step"
+    assert obs.shape == (3, 64, 64), f"Wrong obs shape after step: {obs.shape}"
     assert isinstance(reward, (int, float)), f"Reward not numeric: {type(reward)}"
     assert isinstance(term, bool), f"Terminated not bool: {type(term)}"
     assert isinstance(trunc, bool), f"Truncated not bool: {type(trunc)}"
@@ -483,22 +483,37 @@ def test_key_approach_rewards():
 
 
 def test_shield_avoidance_rewards():
-    """Shield avoidance maze uses dense penalties; optimal path stays negative."""
+    """Shield avoidance: the shield does NOT protect, so detouring for it is wasted.
+
+    Expected totals are derived from the maze's own reward table rather than
+    hardcoded, so tuning rewards in the YAML does not silently invalidate the
+    accounting this test checks.
+    """
     print("\n" + "="*50)
     print("TEST: Shield Avoidance Rewards")
     print("="*50)
 
     env = VisualMazeEnv(maze_name="shield_avoidance")
     env.reset()
+    r = env.rewards
 
-    # Optimal path with shield: down, up, right through trap, right to goal
-    optimal_actions = [1] * 4 + [0] * 4 + [3] * 6
+    # Defining property of this maze: the shield buys nothing.
+    assert r["trap_with_shield"] == r["trap_no_shield"], (
+        "shield_avoidance must charge the same trap cost with and without the "
+        f"shield, got with={r['trap_with_shield']} without={r['trap_no_shield']}"
+    )
+    assert r["shield_pickup"] == 0, (
+        f"Shield pickup should be worthless here, got {r['shield_pickup']}"
+    )
+
+    # Shield detour: 4 down (pickup), 4 up, 6 right through the trap to goal.
+    shield_actions = [1] * 4 + [0] * 4 + [3] * 6
     rewards = []
     terminated = False
     trap_reward = None
     goal_reward = None
 
-    for action in optimal_actions:
+    for action in shield_actions:
         _, reward, terminated, truncated, info = env.step(action)
         rewards.append(reward)
         if info.get("trap_hit_step", -1) == env.steps:
@@ -508,29 +523,53 @@ def test_shield_avoidance_rewards():
         if terminated or truncated:
             break
 
-    assert terminated, "Optimal path should reach goal"
-    assert trap_reward is not None
-    assert trap_reward < 0, f"Trap with shield should be negative, got {trap_reward}"
+    assert terminated, "Shield detour should reach goal"
+    assert trap_reward is not None, "Should have stepped on the trap"
     assert goal_reward is not None and goal_reward > 0, f"Goal should be positive, got {goal_reward}"
-    assert sum(rewards) < 0, f"Optimal total should be negative, got {sum(rewards)}"
-    assert abs(sum(rewards) - (-4.56)) < 1e-6, f"Expected optimal total -4.56, got {sum(rewards)}"
 
-    # Trap without shield should be much worse than optimal shield route
+    n_steps = len(rewards)
+    expected_detour = (
+        n_steps * r["step"] + r["shield_pickup"] + r["trap_with_shield"] + r["goal"]
+    )
+    assert abs(sum(rewards) - expected_detour) < 1e-6, (
+        f"Shield detour total {sum(rewards)} != step*{n_steps} + pickup + "
+        f"trap_with_shield + goal = {expected_detour}"
+    )
+    assert sum(rewards) < 0, f"Detour total should be negative, got {sum(rewards)}"
+
+    # Direct route: 6 right, through the trap, no shield.
     env.reset()
+    direct_rewards = []
     trap_hit_reward = None
-    for _ in range(4):
-        _, reward, term, trunc, info = env.step(3)
+    for _ in range(6):
+        _, reward, terminated, truncated, info = env.step(3)
+        direct_rewards.append(reward)
         if info.get("trap_hit_step", -1) == env.steps:
             trap_hit_reward = reward
+        if terminated or truncated:
             break
 
+    assert terminated, "Direct route should reach goal"
     assert trap_hit_reward is not None, "Should have stepped on trap"
-    assert trap_hit_reward < -20, f"Trap without shield should be large penalty, got {trap_hit_reward}"
-    assert trap_hit_reward == -30.04, f"Expected -30.04 trap damage, got {trap_hit_reward}"
+    assert abs(trap_hit_reward - (r["step"] + r["trap_no_shield"])) < 1e-6, (
+        f"Trap step should charge step + trap_no_shield, got {trap_hit_reward}"
+    )
 
-    print(f"  Optimal path rewards: {rewards}")
-    print(f"  Optimal total: {sum(rewards)}")
-    print(f"  Trap without shield: {trap_hit_reward}")
+    direct_total = sum(direct_rewards)
+    expected_direct = len(direct_rewards) * r["step"] + r["trap_no_shield"] + r["goal"]
+    assert abs(direct_total - expected_direct) < 1e-6, (
+        f"Direct total {direct_total} != {expected_direct}"
+    )
+
+    # The point of the maze: with no protection on offer, the detour is a loss.
+    assert direct_total > sum(rewards), (
+        f"Direct route ({direct_total}) should beat the pointless shield detour "
+        f"({sum(rewards)}) — otherwise this maze is not the reversal of shield_trap"
+    )
+
+    print(f"  Shield detour total: {sum(rewards)} (expected {expected_detour})")
+    print(f"  Direct route total:  {direct_total} (expected {expected_direct})")
+    print(f"  Trap step (no shield): {trap_hit_reward}")
     print("✓ Shield avoidance rewards configured correctly!")
     return True
 
@@ -561,7 +600,20 @@ def test_shield_trap_rewards():
     assert env.rewards["shield_pickup"] > 0, f"Shield pickup should be positive, got {env.rewards['shield_pickup']}"
     assert env.rewards["wall_bump"] < 0, "Wall bump should be negative"
     assert env.rewards["step"] < 0, "Step penalty should be negative"
-    assert abs(shield_total - 2.0) < 1e-6, f"Expected shield path total 2.0, got {shield_total}"
+    # Derived from the maze's own reward table, so YAML tuning does not
+    # silently invalidate the accounting: 14 steps, one pickup, one shielded
+    # trap hit, one goal. (The down-then-up detour revisits each corridor cell
+    # exactly twice, which repeat_free_visits=2 leaves unpenalized.)
+    expected_shield = (
+        14 * env.rewards["step"]
+        + env.rewards["shield_pickup"]
+        + env.rewards["trap_with_shield"]
+        + env.rewards["goal"]
+    )
+    assert abs(shield_total - expected_shield) < 1e-6, (
+        f"Shield path total {shield_total} != step*14 + pickup + "
+        f"trap_with_shield + goal = {expected_shield}"
+    )
 
     env.reset()
     for action in direct_actions:
@@ -574,7 +626,13 @@ def test_shield_trap_rewards():
     assert direct_total < shield_total, (
         f"Direct trap rush ({direct_total}) should be worse than shield path ({shield_total})"
     )
-    assert abs(direct_total - (-48.0)) < 1e-6, f"Expected direct path total -48.0, got {direct_total}"
+    expected_direct = (
+        6 * env.rewards["step"] + env.rewards["trap_no_shield"] + env.rewards["goal"]
+    )
+    assert abs(direct_total - expected_direct) < 1e-6, (
+        f"Direct path total {direct_total} != step*6 + trap_no_shield + goal "
+        f"= {expected_direct}"
+    )
     assert direct_total < 0, "Trap rush should be net negative"
 
     # Forced loop/timeout should be worse than both successful paths
