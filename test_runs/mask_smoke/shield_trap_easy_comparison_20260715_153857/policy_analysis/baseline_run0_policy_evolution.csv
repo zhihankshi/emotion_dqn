@@ -1,3 +1,0 @@
-episode,start_q_values,best_start_action,q_spread,q_max,mood,greedy_reward,greedy_steps,got_key,reached_goal
-20,[-1.2360644  1.6340706 -3.1754613 -1.2385917],DOWN,2.8726623,1.6340706,,10.0,8,False,True
-40,[-1.5949001  3.564695  -3.1857388 -4.349616 ],DOWN,7.914311,3.564695,,-100.0,40,False,False

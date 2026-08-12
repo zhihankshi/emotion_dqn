@@ -1,1 +1,23 @@
-/experiments
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+
+# Tooling
+.claude/
+
+# Experiment / run outputs (regenerable artifacts, often very large)
+/experiments/
+/runs/
+/test_runs/
+/diagnostics/
+/eval_results/
+
+# Model checkpoints anywhere
+*.pt
+*.pth
