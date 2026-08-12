@@ -210,9 +210,11 @@ def train_episode(
                 td_errors.append(update_metrics.get('td_error', 0))
                 q_values.append(update_metrics.get('q_value_mean', 0))
                 
-                # Track mood if emotional agent
+                # Track mood if the agent carries one (emotional or yoked)
                 if 'mood' in update_metrics:
                     moods.append(update_metrics['mood'])
+                if 'mood_clip_fraction' in update_metrics:
+                    metrics.mood_clip_fraction = update_metrics['mood_clip_fraction']
         
         obs = next_obs
     
@@ -226,9 +228,12 @@ def train_episode(
         metrics.mean_td_error = np.mean(td_errors)
         metrics.mean_q_value = np.mean(q_values)
     
-    # Record mood (this is the key fix!)
+    # Record mood. min/max expose swings the mean would hide; clip fraction is
+    # carried straight off the tracker in the update loop above.
     if moods:
         metrics.mean_overall_mood = np.mean(moods)
+        metrics.min_mood = float(np.min(moods))
+        metrics.max_mood = float(np.max(moods))
     else:
         metrics.mean_overall_mood = 0.0
     

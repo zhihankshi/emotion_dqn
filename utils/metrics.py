@@ -41,6 +41,13 @@ class EpisodeMetrics:
     mean_overall_mood: float = 0.0
     exploration_boosts: int = 0
     mean_mood_bias: float = 0.0
+    # Within-episode mood distribution and clip saturation. The mean alone
+    # hides a mood that swings between the bounds, and clip saturation is the
+    # signal that mood_bounds is fighting the reward scale rather than the
+    # mechanism doing work.
+    min_mood: float = 0.0
+    max_mood: float = 0.0
+    mood_clip_fraction: float = 0.0
     
     # Exploration
     epsilon: float = 0.0
@@ -133,6 +140,7 @@ class MetricsLogger:
             'mean_loss', 'mean_td_error', 'mean_q_value',
             'mean_mood_value', 'mean_mood_action', 'mean_overall_mood',
             'exploration_boosts', 'mean_mood_bias',
+            'min_mood', 'max_mood', 'mood_clip_fraction',
             'epsilon', 'effective_epsilon',
             'success_rate_100'
         ]
@@ -180,6 +188,9 @@ class MetricsLogger:
                 f"{metrics.mean_overall_mood:.6f}",
                 metrics.exploration_boosts,
                 f"{metrics.mean_mood_bias:.6f}",
+                f"{metrics.min_mood:.6f}",
+                f"{metrics.max_mood:.6f}",
+                f"{metrics.mood_clip_fraction:.6f}",
                 f"{metrics.epsilon:.4f}",
                 f"{metrics.effective_epsilon:.4f}",
                 f"{success_rate:.4f}"
