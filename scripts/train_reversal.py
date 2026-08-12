@@ -377,6 +377,7 @@ def run_reversal_training(
     )
 
     reward_scale = float(config.get("reward_scale", 1.0))
+    bootstrap_on_truncation = bool(config.get("bootstrap_on_truncation", False))
     schedule_rows: List[Dict[str, Any]] = []
     episode_end_steps: List[int] = []
     recent_paths: deque = deque(maxlen=criterion_window)
@@ -391,7 +392,9 @@ def run_reversal_training(
             episode, epsilon_start, epsilon_floor, epsilon_decay_episodes
         )
         metrics = train_episode(
-            envs[contingency], agent, episode, training=True, reward_scale=reward_scale
+            envs[contingency], agent, episode, training=True,
+            reward_scale=reward_scale,
+            bootstrap_on_truncation=bootstrap_on_truncation,
         )
         logger.log_episode(metrics)
         episode_end_steps.append(getattr(agent, "steps", 0))
@@ -637,6 +640,9 @@ def main():
                         choices=["online", "batch_mean", "batch_sequential"])
     parser.add_argument("--mood_delta_unsigned", action="store_true")
     parser.add_argument("--reward_scale", type=float, default=1.0)
+    parser.add_argument("--bootstrap_on_truncation", action="store_true",
+                        help="Treat timeouts as non-terminal in the value target "
+                             "(all agent types); default off preserves old behavior")
     parser.add_argument("--yoked_mode", type=str, default="replay_trace",
                         choices=["replay_trace", "ou_process"])
     parser.add_argument("--yoked_trace", type=str, nargs="+", default=None)
@@ -655,6 +661,7 @@ def main():
         "mood_delta_source": args.mood_delta_source,
         "mood_delta_signed": not args.mood_delta_unsigned,
         "reward_scale": args.reward_scale,
+        "bootstrap_on_truncation": args.bootstrap_on_truncation,
         "yoked_mode": args.yoked_mode,
         "yoked_traces": args.yoked_trace,
     }

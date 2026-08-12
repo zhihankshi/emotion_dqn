@@ -702,6 +702,9 @@ def main():
                         help="Explicit donor mood_trace.csv file(s)/run dir(s). "
                              "Omit to yoke each run to an emotional run from a "
                              "different seed in this same experiment")
+    parser.add_argument("--bootstrap_on_truncation", action="store_true",
+                        help="Treat timeouts as non-terminal in the value target "
+                             "(all agent types); default off preserves old results")
     parser.add_argument("--reward_scale", type=float, default=1.0,
                         help="Multiply rewards fed to the agent, identically for "
                              "all agent types; logged returns stay unscaled")
@@ -728,6 +731,7 @@ def main():
         "mood_delta_source": args.mood_delta_source,
         "mood_delta_signed": not args.mood_delta_unsigned,
         "reward_scale": args.reward_scale,
+        "bootstrap_on_truncation": args.bootstrap_on_truncation,
         "yoked_mode": args.yoked_mode,
         "yoked_traces": args.yoked_trace,
         "double_dqn": args.double_dqn,

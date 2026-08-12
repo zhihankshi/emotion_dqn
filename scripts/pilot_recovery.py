@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from train import resolve_network_class
 from scripts.train_reversal import (
     run_reversal_training,
+    _parse_reward_overrides,
     PROTECTIVE,
     NON_PROTECTIVE,
 )
@@ -166,6 +167,7 @@ def run_pilot(
     epsilon_decay_episodes: int = 200,
     buffer_size: int = 12000,
     non_protective_trap: Optional[float] = None,
+    reward_overrides: Optional[Dict[str, float]] = None,
     image_size: int = 64,
     network_size: str = "standard",
     log_dir: str = "runs",
@@ -218,6 +220,7 @@ def run_pilot(
                 image_size=image_size,
                 network_class=resolve_network_class(network_size, image_size),
                 non_protective_trap=non_protective_trap,
+                reward_overrides=reward_overrides,
                 verbose=False,
             )
             elapsed = time.time() - t0
@@ -378,6 +381,9 @@ def main():
     parser.add_argument("--epsilon_decay_episodes", type=int, default=200)
     parser.add_argument("--buffer_size", type=int, default=12000)
     parser.add_argument("--non_protective_trap", type=float, default=None)
+    parser.add_argument("--reward", action="append", default=None,
+                        help="Override a base reward key (repeatable), applied to "
+                             "BOTH contingencies, e.g. --reward trap_no_shield=-20")
     parser.add_argument("--image_size", type=int, default=64)
     parser.add_argument("--network_size", type=str, default="standard",
                         choices=["standard", "small"])
@@ -388,6 +394,8 @@ def main():
     parser.add_argument("--mood_delta_source", type=str, default="batch_sequential",
                         choices=["online", "batch_mean", "batch_sequential"])
     parser.add_argument("--reward_scale", type=float, default=1.0)
+    parser.add_argument("--bootstrap_on_truncation", action="store_true",
+                        help="Treat timeouts as non-terminal in the value target")
     parser.add_argument("--reversals_for_budget", type=int, default=8)
     parser.add_argument("--seeds_for_budget", type=int, default=20)
     args = parser.parse_args()
@@ -406,6 +414,7 @@ def main():
         epsilon_decay_episodes=args.epsilon_decay_episodes,
         buffer_size=args.buffer_size,
         non_protective_trap=args.non_protective_trap,
+        reward_overrides=_parse_reward_overrides(args.reward),
         image_size=args.image_size,
         network_size=args.network_size,
         log_dir=args.log_dir,
@@ -415,6 +424,7 @@ def main():
             "lambda_mood": args.lambda_mood,
             "mood_delta_source": args.mood_delta_source,
             "reward_scale": args.reward_scale,
+            "bootstrap_on_truncation": args.bootstrap_on_truncation,
         },
         reversals_for_budget=args.reversals_for_budget,
         n_seeds_for_budget=args.seeds_for_budget,

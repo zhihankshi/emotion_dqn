@@ -131,6 +131,7 @@ def train_episode(
     episode_num: int,
     training: bool = True,
     reward_scale: float = 1.0,
+    bootstrap_on_truncation: bool = False,
 ) -> EpisodeMetrics:
     """Run a single training episode.
 
@@ -139,6 +140,16 @@ def train_episode(
     type, so the baseline/emotional/yoked comparison stays matched. Logged
     returns stay in raw environment units so results remain comparable across
     scales. Default 1.0 = current behavior.
+
+    bootstrap_on_truncation distinguishes the two meanings of "done". A
+    time-limit truncation is not a real terminal state: the world would have
+    continued. Feeding `terminated or truncated` into the value target zeroes
+    the bootstrap there, so the cost of whatever came next is invisible and
+    stalling until the clock runs out looks cheaper than it is (Pardo et al.,
+    "Time Limits in Reinforcement Learning"). With this True, only genuine
+    termination cuts the bootstrap; truncation still ends the episode.
+    Default False preserves historical behavior. Applies identically to every
+    agent type.
     """
     obs, info = env.reset()
     
@@ -186,8 +197,11 @@ def train_episode(
             # Valid actions in the next state, so the bootstrap target only
             # considers actions the agent could actually take there
             next_valid_actions = env.get_valid_actions()
+            # `done` ends the episode; `bootstrap_done` decides whether the
+            # value target keeps looking ahead. They differ only on timeout.
+            bootstrap_done = terminated if bootstrap_on_truncation else done
             update_metrics = agent.step(
-                obs, action, reward * reward_scale, next_obs, done,
+                obs, action, reward * reward_scale, next_obs, bootstrap_done,
                 next_valid_actions=next_valid_actions,
             )
             
@@ -306,8 +320,11 @@ def train(
     epsilon_start = config.get('epsilon_start', 1.0)
     epsilon_end = config.get('epsilon_end', 0.05)
     reward_scale = float(config.get('reward_scale', 1.0))
+    bootstrap_on_truncation = bool(config.get('bootstrap_on_truncation', False))
 
     if verbose:
+        if bootstrap_on_truncation:
+            print("  Bootstrapping through truncation (timeouts are not terminal)")
         if reward_scale != 1.0:
             print(f"  Reward scale: x{reward_scale} (applied to all agent types)")
         if agent_type in ('emotional', 'yoked'):
@@ -390,7 +407,8 @@ def train(
 
         # Train one episode
         metrics = train_episode(
-            env, agent, episode, training=True, reward_scale=reward_scale
+            env, agent, episode, training=True, reward_scale=reward_scale,
+            bootstrap_on_truncation=bootstrap_on_truncation,
         )
         
         # Log
@@ -553,6 +571,11 @@ def main():
                        help='Donor mood_trace.csv file(s) or run dir(s) from a '
                             'completed emotional run with a DIFFERENT seed')
 
+    parser.add_argument('--bootstrap_on_truncation', action='store_true',
+                       help='Treat timeouts as non-terminal in the value target, so '
+                            'the cost of continuing stays visible. Applies to all '
+                            'agent types; default off preserves existing results')
+
     # Reward scaling (applies to all agent types)
     parser.add_argument('--reward_scale', type=float, default=1.0,
                        help='Multiply rewards fed to the agent. Applied identically '
@@ -571,6 +594,7 @@ def main():
         'mood_delta_source': args.mood_delta_source,
         'mood_delta_signed': not args.mood_delta_unsigned,
         'reward_scale': args.reward_scale,
+        'bootstrap_on_truncation': args.bootstrap_on_truncation,
         'yoked_mode': args.yoked_mode,
         'yoked_traces': args.yoked_trace,
         'double_dqn': args.double_dqn,
