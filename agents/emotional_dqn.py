@@ -153,6 +153,7 @@ class EmotionalDQNAgent:
         mood_bounds: Tuple[float, float] = (-1.0, 1.0),
         delta_source: str = "batch_sequential",
         delta_signed: bool = True,
+        record_mood_trace: bool = True,
         # Other
         device: Optional[str] = None,
         seed: Optional[int] = None,
@@ -228,6 +229,11 @@ class EmotionalDQNAgent:
         # delta_source='online': δ of the transition just experienced, computed
         # in step() with the pre-update networks and consumed by update().
         self._pending_online_delta: Optional[float] = None
+
+        # Per-env-step M, for the yoked control's replay_trace mode and for
+        # mood diagnostics. One float per call to step(); cheap to keep.
+        self.record_mood_trace = record_mood_trace
+        self.mood_trace: list = []
 
         # Counters
         self.steps = 0
@@ -353,22 +359,7 @@ class EmotionalDQNAgent:
         torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
         self.optimizer.step()
 
-        # Accumulate mood from the configured δ source (see class docstring).
-        if self.delta_source == "batch_sequential":
-            current_mood = self.mood_tracker.update_batch(
-                td_error_batch.detach().cpu().numpy(),
-                self.eta,
-            )
-        elif self.delta_source == "batch_mean":
-            current_mood = self.mood_tracker.update(td_error, self.eta)
-        else:  # 'online' — δ comes from step(), one update per env step
-            if self._pending_online_delta is not None:
-                current_mood = self.mood_tracker.update(
-                    self._pending_online_delta, self.eta
-                )
-                self._pending_online_delta = None
-            else:
-                current_mood = self.mood_tracker.get_mood()
+        current_mood = self._accumulate_mood(td_error_batch, td_error)
 
         self.updates += 1
 
@@ -385,6 +376,26 @@ class EmotionalDQNAgent:
             'mood_clip_fraction': self.mood_tracker.clip_fraction(),
             'eta': self.eta,
         }
+
+    def _accumulate_mood(self, td_error_batch, td_error: float) -> float:
+        """Integrate this gradient step's δ into M, per ``delta_source``.
+
+        Overridden by :class:`~agents.yoked_dqn.YokedDQNAgent`, whose mood is
+        decoupled from its own TD errors.
+        """
+        if self.delta_source == "batch_sequential":
+            return self.mood_tracker.update_batch(
+                td_error_batch.detach().cpu().numpy(),
+                self.eta,
+            )
+        if self.delta_source == "batch_mean":
+            return self.mood_tracker.update(td_error, self.eta)
+        # 'online' — δ comes from step(), one update per env step
+        if self._pending_online_delta is not None:
+            mood = self.mood_tracker.update(self._pending_online_delta, self.eta)
+            self._pending_online_delta = None
+            return mood
+        return self.mood_tracker.get_mood()
 
     def _compute_online_delta(
         self,
@@ -458,10 +469,39 @@ class EmotionalDQNAgent:
             self.mood_tracker.update(self._pending_online_delta, self.eta)
             self._pending_online_delta = None
 
+        if self.record_mood_trace:
+            self.mood_trace.append(self.mood_tracker.get_mood())
+
         if metrics:
             metrics['epsilon'] = self.epsilon
 
         return metrics
+
+    def save_mood_trace(self, path: str, episode_end_steps: Optional[Sequence[int]] = None) -> None:
+        """Write the per-env-step mood trace as CSV: ``step,episode,mood``.
+
+        episode_end_steps: cumulative ``agent.steps`` at the end of each
+        episode, used to label rows. Rows past the last boundary (or all rows,
+        if omitted) get episode -1.
+        """
+        if not self.mood_trace:
+            return
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        episode_of = np.full(len(self.mood_trace), -1, dtype=np.int64)
+        if episode_end_steps:
+            start = 0
+            for ep, end in enumerate(episode_end_steps):
+                end = min(int(end), len(self.mood_trace))
+                if end > start:
+                    episode_of[start:end] = ep
+                start = end
+
+        with open(path, "w", newline="") as f:
+            f.write("step,episode,mood\n")
+            for i, (ep, m) in enumerate(zip(episode_of, self.mood_trace), start=1):
+                f.write(f"{i},{ep},{m:.6f}\n")
 
     def reset_episode(self) -> None:
         """Reset for new episode - mood persists."""

@@ -7,12 +7,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A research codebase testing whether a computational mood signal (Emanuel & Eldar, "Emotions as
 Computations") improves DQN learning in small visual mazes, against a *matched* baseline DQN.
 
-The two agents differ in exactly one term:
+The agents differ in exactly one term:
 
 - Baseline (`agents/dqn.py`): `Q_target = Q + η·δ`
 - Emotional (`agents/emotional_dqn.py`): `Q_target = Q + η·δ + (1-η)·M`
-- Mood update: `M ← M + (1-λ)·(η·δ - M)`, clipped to `mood_bounds`, **persisting across episodes**
-  (`reset_episode()` is intentionally a no-op)
+- Yoked control (`agents/yoked_dqn.py`): same rule, but M is supplied from outside and never
+  touches its own δ — either a recorded M(t) trace from another emotional run (`replay_trace`)
+  or an OU/AR(1) process fitted to such traces (`ou_process`). Comparisons are three-way:
+  emotional − yoked isolates "mood is the agent's *own* signal"; yoked − baseline is everything
+  else (correlated target noise, effective step size). Run it with
+  `--agents baseline,emotional,yoked`; yoked must come after emotional, which produces the
+  donor traces (`mood_trace.csv` per run, written by `train()`).
+- Mood update: `M ← M + (1-λ)·(η·δ - M)` = `λ·M + (1-λ)·η·δ`, so **λ is the retention per mood
+  update**. Clipped to `mood_bounds`, **persisting across episodes** (`reset_episode()` is
+  intentionally a no-op).
+- `mood.delta_source` (`--mood_delta_source`) picks what feeds M: `online` (one update per env
+  step from the experienced transition — theory-faithful), `batch_mean` (one per gradient step),
+  or `batch_sequential` (default/historical: one per batch element, so effective retention per
+  gradient step is λ^32 ≈ 8e-4 at λ=0.8 — reaching an intended 0.8 needs λ ≈ 0.993).
+- `--reward_scale` (all agent types) and `--mood_clip_range` exist because raw maze rewards span
+  ~±55 against a ±1 mood clip.
 
 `η` (`--eta`) is shared by both agents, so any change to it must apply to both or the comparison
 stops being matched. The same holds for network init, seeding, optimizer, buffer, target-net sync,

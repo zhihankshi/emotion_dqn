@@ -3,6 +3,7 @@ Training script for DQN agents on visual maze.
 Supports both baseline and emotional agents.
 """
 import argparse
+import json
 import numpy as np
 import torch
 from pathlib import Path
@@ -11,7 +12,14 @@ from tqdm import tqdm
 from typing import Dict, Any, Optional, Set
 
 from environments import VisualMazeEnv
-from agents import DQNAgent, EmotionalDQNAgent, DQNNetwork, SmallDQNNetwork
+from agents import (
+    DQNAgent,
+    EmotionalDQNAgent,
+    YokedDQNAgent,
+    DQNNetwork,
+    SmallDQNNetwork,
+    build_mood_source,
+)
 from utils import EpisodeMetrics, MetricsLogger
 from utils.path_analysis import classify_episode_path
 
@@ -91,15 +99,29 @@ def create_agent(
     if agent_type == 'baseline':
         return DQNAgent(**common_params)
     
-    elif agent_type == 'emotional':
-        emotional_params = {
-            'lambda_mood': config.get('lambda_mood', 0.8),
-            'mood_bounds': resolve_mood_bounds(config),
-            'delta_source': config.get('mood_delta_source', 'batch_sequential'),
-            'delta_signed': config.get('mood_delta_signed', True),
-        }
-        return EmotionalDQNAgent(**common_params, **emotional_params)
-    
+    mood_params = {
+        'lambda_mood': config.get('lambda_mood', 0.8),
+        'mood_bounds': resolve_mood_bounds(config),
+        'delta_source': config.get('mood_delta_source', 'batch_sequential'),
+        'delta_signed': config.get('mood_delta_signed', True),
+        'record_mood_trace': config.get('record_mood_trace', True),
+    }
+
+    if agent_type == 'emotional':
+        return EmotionalDQNAgent(**common_params, **mood_params)
+
+    elif agent_type == 'yoked':
+        mood_source = build_mood_source(
+            mode=config.get('yoked_mode', 'replay_trace'),
+            trace_paths=config.get('yoked_traces'),
+            bounds=mood_params['mood_bounds'],
+            # Private RNG for the OU process, offset so it cannot coincide with
+            # the shared training seed; the global stream stays untouched.
+            seed=None if seed is None else seed + 10_000,
+            ou_params=config.get('yoked_ou_params'),
+        )
+        return YokedDQNAgent(**common_params, **mood_params, mood_source=mood_source)
+
     else:
         raise ValueError(f"Unknown agent type: {agent_type}")
 
@@ -288,7 +310,7 @@ def train(
     if verbose:
         if reward_scale != 1.0:
             print(f"  Reward scale: x{reward_scale} (applied to all agent types)")
-        if agent_type == 'emotional':
+        if agent_type in ('emotional', 'yoked'):
             print(
                 f"  Mood: delta_source={config.get('mood_delta_source', 'batch_sequential')}"
                 f" signed={config.get('mood_delta_signed', True)}"
@@ -361,6 +383,8 @@ def train(
         pbar = tqdm(episode_iter, mininterval=2.0, leave=False)
         episode_iter = pbar
 
+    episode_end_steps = []
+
     for episode in episode_iter:
         agent.update_epsilon_for_episode(episode, n_episodes)
 
@@ -371,6 +395,7 @@ def train(
         
         # Log
         logger.log_episode(metrics)
+        episode_end_steps.append(getattr(agent, 'steps', 0))
 
         episode_num = episode + 1
         if should_save_checkpoint(episode_num, checkpoint_episodes):
@@ -397,6 +422,27 @@ def train(
     # Save agent
     agent_path = run_log_dir / f"{agent_type}_agent.pt"
     agent.save(str(agent_path))
+
+    # Per-step mood trace: the donor data for the yoked control (Task 2) and
+    # the raw material for mood diagnostics.
+    mood_trace_path = run_log_dir / "mood_trace.csv"
+    if hasattr(agent, 'save_mood_trace'):
+        agent.save_mood_trace(str(mood_trace_path), episode_end_steps)
+
+    if hasattr(agent, 'describe_mood_source'):
+        source_info = agent.describe_mood_source()
+        with open(run_log_dir / "mood_source.json", "w") as f:
+            json.dump(source_info, f, indent=2)
+
+        held = source_info.get('held_final', 0)
+        total = held + source_info.get('consumed', 0)
+        if total and held / total > 0.25:
+            print(
+                f"  WARNING: donor mood trace exhausted — {held}/{total} steps "
+                f"({held / total:.0%}) ran on a frozen final mood. The yoked "
+                f"control only matches the emotional agent's autocorrelation "
+                f"while the trace lasts; use a donor run of comparable length."
+            )
     
     if verbose:
         print(f"\n{'='*60}")
@@ -409,7 +455,7 @@ def train(
         print(f"  First success: episode {summary.get('first_success', -1)}")
         print(f"  Total successes: {summary.get('total_successes', 0)}/{n_episodes}")
         
-        if agent_type == 'emotional':
+        if agent_type in ('emotional', 'yoked'):
             print(f"  Avg mood: {summary.get('avg_mood', 0):.4f}")
             print(f"  Total exploration boosts: {summary.get('total_exploration_boosts', 0)}")
         
@@ -425,8 +471,9 @@ def main():
     
     # Required arguments
     parser.add_argument('--agent', type=str, default='emotional',
-                       choices=['baseline', 'emotional'],
-                       help='Type of agent to train')
+                       choices=['baseline', 'emotional', 'yoked'],
+                       help='Type of agent to train ("yoked" = mood control, '
+                            'requires --yoked_trace)')
     
     # Environment
     parser.add_argument('--maze', type=str, default='minimal',
@@ -496,6 +543,16 @@ def main():
     parser.add_argument('--mood_delta_unsigned', action='store_true',
                        help='Integrate |delta| (arousal) instead of signed delta (valence)')
 
+    # Yoked mood control
+    parser.add_argument('--yoked_mode', type=str, default='replay_trace',
+                       choices=['replay_trace', 'ou_process'],
+                       help='How the yoked agent gets its mood: replay a recorded '
+                            'trace from another emotional run, or an OU process '
+                            'fitted to such traces')
+    parser.add_argument('--yoked_trace', type=str, nargs='+', default=None,
+                       help='Donor mood_trace.csv file(s) or run dir(s) from a '
+                            'completed emotional run with a DIFFERENT seed')
+
     # Reward scaling (applies to all agent types)
     parser.add_argument('--reward_scale', type=float, default=1.0,
                        help='Multiply rewards fed to the agent. Applied identically '
@@ -514,6 +571,8 @@ def main():
         'mood_delta_source': args.mood_delta_source,
         'mood_delta_signed': not args.mood_delta_unsigned,
         'reward_scale': args.reward_scale,
+        'yoked_mode': args.yoked_mode,
+        'yoked_traces': args.yoked_trace,
         'double_dqn': args.double_dqn,
         'epsilon_end': args.epsilon_end,
         'target_update_freq': args.target_update_freq,

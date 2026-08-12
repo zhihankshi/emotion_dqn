@@ -274,13 +274,30 @@ def run_comparison(
     shield_lights_up: Optional[bool] = None,
     show_tqdm: bool = False,
     frame_stack: int = 1,
+    agent_types: Optional[List[str]] = None,
 ) -> ExperimentLogger:
     """
-    Run comparison experiment between baseline and emotional agents.
+    Run comparison experiment across agent types.
+
+    agent_types defaults to ["baseline", "emotional"]. Pass
+    ["baseline", "emotional", "yoked"] for the three-way comparison the yoked
+    control is for. "yoked" must come after "emotional" in the list: each
+    yoked run consumes the mood trace of an emotional run from a *different*
+    seed produced earlier in this same experiment (run_id r takes emotional
+    run (r + 1) % n_runs), unless config["yoked_traces"] names donors
+    explicitly.
 
     Each training run saves checkpoints under:
         {experiment_dir}/{agent_type}/{run_log_dir}/checkpoints/
     """
+    if agent_types is None:
+        agent_types = ["baseline", "emotional"]
+    if "yoked" in agent_types and "emotional" not in agent_types \
+            and not (config or {}).get("yoked_traces"):
+        raise ValueError(
+            "A yoked run needs donor mood traces: either include 'emotional' "
+            "in agent_types or set config['yoked_traces']"
+        )
     if config is None:
         config = {}
 
@@ -308,7 +325,8 @@ def run_comparison(
         print(f"  Epsilon decay: {eps_start} -> {eps_end} over {n_episodes} episodes")
         print(f"  Checkpoint interval: {checkpoint_interval}")
         print(f"  Planned checkpoint episodes: {planned_episodes}")
-        print(f"  Total training runs: {n_runs * 2}")
+        print(f"  Agent types: {', '.join(agent_types)}")
+        print(f"  Total training runs: {n_runs * len(agent_types)}")
         print(f"  Image size: {image_size}")
         print(f"  Network: {network_class.__name__ if network_class else 'DQNNetwork'}")
         if baseline_checkpoint:
@@ -322,8 +340,11 @@ def run_comparison(
         print(f"  Config: {config}")
         print("=" * 70)
 
-    total_runs = n_runs * 2
+    total_runs = n_runs * len(agent_types)
     checkpoint_manifest: List[Dict[str, Any]] = []
+    # run_id -> mood_trace.csv, filled in as emotional runs finish, so yoked
+    # runs can be yoked to a real mood trace from a different seed.
+    emotional_traces: Dict[int, str] = {}
 
     overall_pbar = tqdm(
         total=total_runs,
@@ -333,7 +354,7 @@ def run_comparison(
         colour="green",
     )
 
-    for agent_type in ["baseline", "emotional"]:
+    for agent_type in agent_types:
         if verbose:
             print(f"\n{'=' * 70}")
             print(f"TRAINING {agent_type.upper()} AGENT ({n_runs} runs)")
@@ -355,6 +376,28 @@ def run_comparison(
             elif agent_type == "emotional" and emotional_checkpoint:
                 pretrained_checkpoint = emotional_checkpoint
 
+            run_config = config
+            if agent_type == "yoked" and not config.get("yoked_traces"):
+                # Yoke to an emotional run from a different seed: shifting by
+                # one keeps each donor distinct from the run it feeds, and with
+                # n_runs == 1 there is no different-seed donor to be had.
+                donor_id = (run_id + 1) % n_runs
+                if donor_id == run_id or donor_id not in emotional_traces:
+                    donor_id = next(
+                        (rid for rid in sorted(emotional_traces) if rid != run_id),
+                        None,
+                    )
+                if donor_id is None:
+                    raise RuntimeError(
+                        "No emotional mood trace from a different seed is "
+                        "available to yoke run {} to. Use --runs >= 2 or pass "
+                        "--yoked_trace explicitly.".format(run_id)
+                    )
+                run_config = {**config, "yoked_traces": [emotional_traces[donor_id]]}
+                if verbose:
+                    print(f"  Yoked to emotional run {donor_id}: "
+                          f"{emotional_traces[donor_id]}")
+
             logger = train(
                 maze_name=maze_name,
                 agent_type=agent_type,
@@ -363,7 +406,7 @@ def run_comparison(
                 log_dir=str(experiment_dir / agent_type),
                 run_id=run_id,
                 device=device,
-                config=config,
+                config=run_config,
                 verbose=True,
                 progress_every=max(1, n_episodes // 5),
                 checkpoint_interval=checkpoint_interval,
@@ -380,6 +423,11 @@ def run_comparison(
 
             run_metrics = logger.get_run_metrics()
             exp_logger.add_run(run_metrics)
+
+            if agent_type == "emotional":
+                trace_path = Path(logger.log_dir) / "mood_trace.csv"
+                if trace_path.exists():
+                    emotional_traces[run_id] = str(trace_path)
 
             entry = build_run_checkpoint_entry(
                 agent_type=agent_type,
@@ -643,6 +691,17 @@ def main():
                         help="Which delta feeds the mood (see EmotionalDQNAgent docstring)")
     parser.add_argument("--mood_delta_unsigned", action="store_true",
                         help="Integrate |delta| (arousal) instead of signed delta (valence)")
+    parser.add_argument("--agents", type=str, default="baseline,emotional",
+                        help="Comma-separated agent types to run, in order. Use "
+                             "'baseline,emotional,yoked' for the three-way "
+                             "comparison; yoked must follow emotional")
+    parser.add_argument("--yoked_mode", type=str, default="replay_trace",
+                        choices=["replay_trace", "ou_process"],
+                        help="How yoked agents get their mood")
+    parser.add_argument("--yoked_trace", type=str, nargs="+", default=None,
+                        help="Explicit donor mood_trace.csv file(s)/run dir(s). "
+                             "Omit to yoke each run to an emotional run from a "
+                             "different seed in this same experiment")
     parser.add_argument("--reward_scale", type=float, default=1.0,
                         help="Multiply rewards fed to the agent, identically for "
                              "all agent types; logged returns stay unscaled")
@@ -669,10 +728,21 @@ def main():
         "mood_delta_source": args.mood_delta_source,
         "mood_delta_signed": not args.mood_delta_unsigned,
         "reward_scale": args.reward_scale,
+        "yoked_mode": args.yoked_mode,
+        "yoked_traces": args.yoked_trace,
         "double_dqn": args.double_dqn,
         "epsilon_end": args.epsilon_end,
         "target_update_freq": args.target_update_freq,
     }
+
+    agent_types = [a.strip() for a in args.agents.split(",") if a.strip()]
+    unknown = [a for a in agent_types if a not in ("baseline", "emotional", "yoked")]
+    if unknown:
+        parser.error(f"Unknown agent type(s): {', '.join(unknown)}")
+    if "yoked" in agent_types and "emotional" in agent_types \
+            and agent_types.index("yoked") < agent_types.index("emotional"):
+        parser.error("'yoked' must come after 'emotional': it consumes the mood "
+                     "traces those runs produce")
 
     if args.mood_min is not None or args.mood_max is not None:
         config["mood_bounds"] = (
@@ -726,6 +796,7 @@ def main():
             shield_lights_up=args.shield_lights_up,
             show_tqdm=args.tqdm,
             frame_stack=args.frame_stack,
+            agent_types=agent_types,
         )
 
 

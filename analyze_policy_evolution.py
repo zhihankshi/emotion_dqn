@@ -42,6 +42,9 @@ def load_agent_checkpoint(
             network_class=network_class,
         )
     else:
+        # 'baseline' and 'yoked' both load as a plain DQN here: analysis only
+        # reads policy_net, and a YokedDQNAgent would demand a mood source it
+        # has no use for once training is over.
         agent = DQNAgent(
             observation_shape=observation_shape,
             n_actions=env.action_space.n,
