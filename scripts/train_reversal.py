@@ -78,22 +78,39 @@ NON_PROTECTIVE = "non_protective"
 CONTINGENCIES = (PROTECTIVE, NON_PROTECTIVE)
 
 
+# Canonical routes per maze, used only to validate that a reversal actually
+# reverses which route is optimal. Actions: 0=up 1=down 2=left 3=right.
+CANONICAL_ROUTES: Dict[str, Dict[str, List[int]]] = {
+    "shield_trap_easy": {"shield_route": [1, 0] + [3] * 4, "direct": [3] * 4},
+    "shield_trap": {"shield_route": [1] * 4 + [0] * 4 + [3] * 6, "direct": [3] * 6},
+    "shield_avoidance": {"shield_route": [1] * 4 + [0] * 4 + [3] * 6, "direct": [3] * 6},
+}
+
+
 def contingency_overrides(
     maze_name: str,
     extra_overrides: Optional[Dict[str, float]] = None,
+    non_protective_trap: Optional[float] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Reward overrides for each contingency, from one maze file.
 
-    Only ``trap_with_shield`` differs: under ``non_protective`` it equals
-    ``trap_no_shield``, so carrying the shield changes nothing about the trap.
+    Only ``trap_with_shield`` differs between the two.
+
+    Under ``non_protective`` it defaults to ``trap_no_shield`` — the shield
+    stops protecting. Beware: that alone does **not** guarantee the optimal
+    *route* reverses. If the shield pickup bonus exceeds the detour's step
+    cost, the detour stays weakly optimal even when the shield is useless, and
+    there is no behavioural change to measure. Pass ``non_protective_trap``
+    (a worse-than-unshielded trap cost, i.e. carrying the shield now hurts) to
+    get a genuine reversal. ``validate_contingency_reversal`` checks this.
     """
     rewards = dict(load_maze(maze_name)["rewards"])
     base = dict(extra_overrides or {})
 
     protective = {**base, "trap_with_shield": float(rewards["trap_with_shield"])}
-    non_protective = {**base, "trap_with_shield": float(
-        base.get("trap_no_shield", rewards["trap_no_shield"])
-    )}
+    if non_protective_trap is None:
+        non_protective_trap = base.get("trap_no_shield", rewards["trap_no_shield"])
+    non_protective = {**base, "trap_with_shield": float(non_protective_trap)}
 
     if protective["trap_with_shield"] == non_protective["trap_with_shield"]:
         raise ValueError(
@@ -102,6 +119,69 @@ def contingency_overrides(
             f"identical and there is nothing to reverse."
         )
     return {PROTECTIVE: protective, NON_PROTECTIVE: non_protective}
+
+
+def route_returns(env, routes: Dict[str, List[int]]) -> Dict[str, float]:
+    """Undiscounted return of each scripted route in this env."""
+    out: Dict[str, float] = {}
+    for name, actions in routes.items():
+        env.reset()
+        total = 0.0
+        for action in actions:
+            _, reward, terminated, truncated, _ = env.step(action)
+            total += reward
+            if terminated or truncated:
+                break
+        out[name] = round(total, 4)
+    return out
+
+
+def validate_contingency_reversal(
+    maze_name: str,
+    envs: Dict[str, Any],
+    verbose: bool = True,
+) -> Dict[str, Any]:
+    """Check the flip actually reverses which route is optimal.
+
+    A contingency change that leaves the same route optimal produces no
+    behavioural adaptation, so episodes-to-recovery is undefined and the whole
+    reversal readout is vacuous. This is easy to get wrong: making the shield
+    merely useless is not enough when the pickup bonus already pays for the
+    detour.
+    """
+    routes = CANONICAL_ROUTES.get(maze_name)
+    if not routes:
+        if verbose:
+            print(f"  (no canonical routes registered for '{maze_name}' — "
+                  f"reversal strength not validated)")
+        return {"validated": False, "reversed": None}
+
+    returns = {c: route_returns(envs[c], routes) for c in CONTINGENCIES}
+    best = {c: max(returns[c], key=returns[c].get) for c in CONTINGENCIES}
+    margins = {
+        c: abs(returns[c]["shield_route"] - returns[c]["direct"]) for c in CONTINGENCIES
+    }
+    flipped = best[PROTECTIVE] != best[NON_PROTECTIVE]
+
+    if verbose:
+        for c in CONTINGENCIES:
+            print(f"  {c:15s} shield_route {returns[c]['shield_route']:+8.1f} | "
+                  f"direct {returns[c]['direct']:+8.1f} | best: {best[c]} "
+                  f"(margin {margins[c]:.1f})")
+        if flipped:
+            print(f"  Reversal is genuine: optimal route flips "
+                  f"{best[PROTECTIVE]} -> {best[NON_PROTECTIVE]}")
+        else:
+            print(f"  !! NO REVERSAL: '{best[PROTECTIVE]}' stays optimal under both "
+                  f"contingencies. There is no behavioural change to adapt to.")
+
+    return {
+        "validated": True,
+        "reversed": flipped,
+        "returns": returns,
+        "best_route": best,
+        "margins": margins,
+    }
 
 
 def verify_visual_identity(env_a, env_b, verbose: bool = True) -> Tuple[bool, List[str]]:
@@ -190,6 +270,8 @@ def run_reversal_training(
     frame_stack: int = 1,
     max_steps: Optional[int] = None,
     reward_overrides: Optional[Dict[str, float]] = None,
+    non_protective_trap: Optional[float] = None,
+    allow_weak_reversal: bool = False,
     shield_lights_up: Optional[bool] = None,
     verbose: bool = True,
     progress_every: int = 50,
@@ -214,7 +296,7 @@ def run_reversal_training(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    overrides = contingency_overrides(maze_name, reward_overrides)
+    overrides = contingency_overrides(maze_name, reward_overrides, non_protective_trap)
 
     envs = {
         name: VisualMazeEnv(
@@ -249,6 +331,17 @@ def run_reversal_training(
         print(f"  Buffer:            {buffer_size} (never flushed)")
         print(f"  Seed:              {seed}")
         print(f"  Output:            {run_log_dir}")
+
+    reversal_check = validate_contingency_reversal(maze_name, envs, verbose=verbose)
+    if reversal_check.get("validated") and not reversal_check.get("reversed") \
+            and not allow_weak_reversal:
+        raise RuntimeError(
+            f"The contingency flip does not change which route is optimal on "
+            f"'{maze_name}' ({reversal_check['best_route'][PROTECTIVE]} wins under "
+            f"both), so there is no adaptation to measure. Pass "
+            f"--non_protective_trap <worse-than-unshielded cost> to make the "
+            f"shield actively harmful, or --allow_weak_reversal to override."
+        )
 
     identical, differences = verify_visual_identity(
         envs[PROTECTIVE], envs[NON_PROTECTIVE], verbose=verbose
@@ -448,6 +541,7 @@ def run_reversal_training(
         "target_net_reset_at_reversals": False,
         "mood_reset_at_reversals": False,
         "contingencies": overrides,
+        "reversal_check": reversal_check,
         "visual_identity_verified": identical,
         "block_boundaries": block_boundaries,
         "config": {k: v for k, v in config.items() if k != "yoked_traces"},
@@ -522,6 +616,13 @@ def main():
     parser.add_argument("--max_steps", type=int, default=None)
     parser.add_argument("--reward", action="append", default=None,
                         help="Override a reward key (repeatable), e.g. --reward step=-0.25")
+    parser.add_argument("--non_protective_trap", type=float, default=None,
+                        help="trap_with_shield under the non_protective contingency. "
+                             "Default = trap_no_shield (shield merely useless), which "
+                             "often does NOT reverse the optimal route; set a worse "
+                             "value so carrying the shield actively hurts")
+    parser.add_argument("--allow_weak_reversal", action="store_true",
+                        help="Run even if the flip leaves the same route optimal")
     parser.add_argument("--shield_lights_up", action="store_true", default=None)
 
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -582,6 +683,8 @@ def main():
         frame_stack=args.frame_stack,
         max_steps=args.max_steps,
         reward_overrides=_parse_reward_overrides(args.reward),
+        non_protective_trap=args.non_protective_trap,
+        allow_weak_reversal=args.allow_weak_reversal,
         shield_lights_up=args.shield_lights_up,
     )
 
