@@ -36,6 +36,9 @@ import numpy as np
 # Path type that is optimal under each contingency.
 OPTIMAL_PATH_TYPE = {"protective": "shield_route", "non_protective": "trap_rush"}
 
+# Contingency label that marks the *worsening* direction of a reversal.
+NON_PROTECTIVE_KEY = "non_protective"
+
 # Agents that carry a mood term; the baseline has none, so the mood gate does
 # not apply to it.
 MOOD_CARRYING_AGENTS = ("emotional", "yoked")
@@ -374,6 +377,87 @@ def mood_dip_test(
     }
 
 
+def directional_mood_test(
+    rows: Sequence[Dict[str, Any]],
+    pre: int = 20,
+    post: int = 20,
+    exclude_first_reversal: bool = True,
+) -> Dict[str, Any]:
+    """Does M move in the direction each contingency change warrants?
+
+    ``mood_dip_test`` asks whether M *drops* after every reversal. That is only
+    the right question if every reversal makes the world worse. Under the
+    alternating schedule here it does not: blocks run
+    ``non_protective, protective, non_protective, ...``, so entering
+    ``non_protective`` (trap becomes lethal) should push M down while entering
+    ``protective`` (trap becomes cheap again) should push it up.
+
+    Pooling both directions and requiring a majority to dip caps the achievable
+    rate at the fraction of scored blocks that enter ``non_protective`` — with
+    reversals 2..4 that is 1 of 3. A perfectly functioning mood signal therefore
+    *fails* the undirected gate. This test scores each block against its own
+    expected sign instead, and reports the separation between the two
+    directions, which is the quantity the mechanism actually predicts.
+    """
+    blocks = split_blocks(rows)
+    if exclude_first_reversal:
+        blocks = blocks[1:]
+    if not blocks:
+        return {"pass": False, "reason": "no reversal blocks to score"}
+
+    by_episode = {r["episode"]: r for r in rows}
+
+    def _window_mean(onset: int, lo: int, hi: int) -> float:
+        vals = [by_episode[e]["mean_mood"] for e in range(onset + lo, onset + hi)
+                if e in by_episode]
+        return float(np.mean(vals)) if vals else float("nan")
+
+    per_block = []
+    for block in blocks:
+        onset = block[0]["episode"]
+        entering = block[0]["contingency"]
+        before = _window_mean(onset, -pre, 0)
+        after = _window_mean(onset, 0, post)
+        delta = after - before
+        # Entering non_protective is a worsening (expect M down); entering
+        # protective is an improvement (expect M up).
+        expected = -1.0 if entering == NON_PROTECTIVE_KEY else 1.0
+        per_block.append({
+            "entering": entering,
+            "delta": None if np.isnan(delta) else round(float(delta), 6),
+            "expected_sign": expected,
+            "correct": (not np.isnan(delta)) and (np.sign(delta) == expected),
+        })
+
+    scored = [b for b in per_block if b["delta"] is not None]
+    if not scored:
+        return {"pass": False, "reason": "no valid mood windows",
+                "per_block": per_block}
+
+    worse = [b["delta"] for b in scored if b["entering"] == NON_PROTECTIVE_KEY]
+    better = [b["delta"] for b in scored if b["entering"] != NON_PROTECTIVE_KEY]
+    n_correct = sum(b["correct"] for b in scored)
+
+    # The mechanism's actual prediction: M after an improvement should sit above
+    # M after a worsening. Positive separation = mood tracks the contingency.
+    separation = (float(np.mean(better)) - float(np.mean(worse))
+                  if worse and better else float("nan"))
+
+    return {
+        "pass": bool(separation > 0) if not np.isnan(separation)
+                else n_correct > len(scored) / 2,
+        "n_blocks": len(scored),
+        "n_correct_sign": int(n_correct),
+        "frac_correct_sign": round(n_correct / len(scored), 4),
+        "mean_delta_into_non_protective": (round(float(np.mean(worse)), 6)
+                                           if worse else None),
+        "mean_delta_into_protective": (round(float(np.mean(better)), 6)
+                                       if better else None),
+        "separation": None if np.isnan(separation) else round(separation, 6),
+        "per_block": per_block,
+    }
+
+
 # --------------------------------------------------------------------------
 # aggregation across runs
 # --------------------------------------------------------------------------
@@ -428,6 +512,8 @@ def analyze_study(
             "perseveration": perseveration(rows, exclude_first_reversal)["mean"],
             **within_window_summary(rows, window, exclude_first_reversal),
             "mood_dip": mood_dip_test(rows, window, window, exclude_first_reversal),
+            "mood_directional": directional_mood_test(
+                rows, window, window, exclude_first_reversal),
             "per_block_recovery": rec["per_block"],
         }
         per_run.append(entry)
@@ -440,6 +526,10 @@ def analyze_study(
         used = rows_a if include_non_acquirers else [r for r in rows_a if r["reached_criterion"]]
         primaries = [r["primary"] for r in used if r["primary"] is not None]
         mood_pass = [r["mood_dip"].get("pass") for r in used if r["mood_dip"].get("pass") is not None]
+        mood_dir_pass = [r["mood_directional"].get("pass") for r in used
+                         if r["mood_directional"].get("pass") is not None]
+        mood_sep = [r["mood_directional"].get("separation") for r in used
+                    if r["mood_directional"].get("separation") is not None]
         groups[agent_type] = {
             "n_runs": len(rows_a),
             "n_excluded_non_acquirers": len(rows_a) - len(used),
@@ -460,6 +550,12 @@ def analyze_study(
             )) if used else None,
             "mood_dip_pass_rate": (
                 float(np.mean(mood_pass)) if mood_pass else None
+            ),
+            "mood_directional_pass_rate": (
+                float(np.mean(mood_dir_pass)) if mood_dir_pass else None
+            ),
+            "mood_separation_mean": (
+                float(np.mean(mood_sep)) if mood_sep else None
             ),
         }
 
@@ -540,20 +636,27 @@ def print_report(analysis: Dict[str, Any]) -> None:
                   if diff is not None else f"    {name}: insufficient data")
             print(f"      {c['note']}")
 
-    print("\n  MOOD DIAGNOSTIC (gate — if mood does not move, nothing downstream means anything)")
+    print("\n  MOOD DIAGNOSTIC (gate — if mood does not track the contingency, "
+          "nothing downstream means anything)")
     scored_any = False
     for agent_type, g in analysis["groups"].items():
         # Only mood-carrying agents have a mood to test. A baseline "FAIL"
         # would be meaningless — it has no M by construction.
         if agent_type not in MOOD_CARRYING_AGENTS:
             continue
-        rate = g["mood_dip_pass_rate"]
+        rate = g.get("mood_directional_pass_rate")
+        sep = g.get("mood_separation_mean")
         if rate is None:
             continue
         scored_any = True
         verdict = "PASS" if rate >= 0.5 else "FAIL"
-        print(f"    {agent_type:<12} M dips after reversal in {rate:.0%} of runs  "
-              f"-> {verdict}")
+        sep_s = f"{sep:+.4f}" if sep is not None else "n/a"
+        print(f"    {agent_type:<12} M tracks contingency direction in {rate:.0%} "
+              f"of runs (mean separation {sep_s})  -> {verdict}")
+        legacy = g.get("mood_dip_pass_rate")
+        if legacy is not None:
+            print(f"                 [undirected dip test: {legacy:.0%} — not the gate "
+                  f"under an alternating schedule; see directional_mood_test]")
         if agent_type == "emotional" and verdict == "FAIL":
             print("      !! The mood mechanism is not engaging with the contingency "
                   "change. Adaptation differences cannot be attributed to mood.")
