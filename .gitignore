@@ -17,6 +17,7 @@ venv/
 /test_runs/
 /diagnostics/
 /eval_results/
+/colabruns/
 
 # Model checkpoints anywhere
 *.pt
