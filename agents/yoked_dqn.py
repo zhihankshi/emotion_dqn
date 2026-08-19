@@ -50,6 +50,9 @@ from .emotional_dqn import EmotionalDQNAgent
 
 YOKED_MODES = ("replay_trace", "ou_process")
 
+# What a replayed trace does once the recipient outlives it.
+EXHAUSTION_MODES = ("reflect", "hold")
+
 
 def load_mood_trace(path: str) -> np.ndarray:
     """Load a per-step mood trace written by ``EmotionalDQNAgent.save_mood_trace``.
@@ -79,32 +82,67 @@ def load_mood_traces(paths: Sequence[str]) -> List[np.ndarray]:
 class TraceMoodSource:
     """Replays a recorded M(t) trace one value per environment step.
 
-    Length mismatch is handled by holding the final value: a yoked run longer
-    than its donor trace keeps M pinned at the donor's last mood rather than
-    wrapping (which would inject a spurious discontinuity) or resetting to 0
-    (which would silently switch off the manipulation mid-run).
+    Donor and recipient lengths never match: acquisition is criterion-
+    terminated, so a yoked run routinely outlives the emotional run it is
+    yoked to. ``exhaustion`` decides what happens past the end of the trace.
+
+    ``reflect`` (default)
+        Mirror the trace at its endpoint and walk back: M(T+k) = M(T-k). The
+        join is continuous, and the padding keeps the donor's marginal
+        distribution and local autocorrelation, so the control stays a mood
+        *shaped* signal for the whole run.
+
+    ``hold`` (legacy)
+        Pin M at the donor's final value. This is what the original
+        implementation did, and it silently degrades the control into a
+        constant offset — worse, into a constant at whatever extreme the donor
+        happened to end on, which shows up as a spike in clip saturation. Kept
+        only so earlier studies remain reproducible.
+
+    Wrapping to the start is deliberately not offered: it injects a jump
+    discontinuity at every wrap.
     """
 
     mode = "replay_trace"
 
-    def __init__(self, trace: np.ndarray, source_path: Optional[str] = None):
+    def __init__(
+        self,
+        trace: np.ndarray,
+        source_path: Optional[str] = None,
+        exhaustion: str = "reflect",
+    ):
         if len(trace) == 0:
             raise ValueError("Mood trace is empty")
+        if exhaustion not in EXHAUSTION_MODES:
+            raise ValueError(
+                f"exhaustion must be one of {EXHAUSTION_MODES}, got {exhaustion!r}"
+            )
         self.trace = np.asarray(trace, dtype=np.float64)
         self.source_path = source_path
+        self.exhaustion = exhaustion
         self.index = 0
-        self.n_held = 0
+        self.n_held = 0  # steps served from padding rather than the trace itself
 
     def __len__(self) -> int:
         return len(self.trace)
 
+    def _reflected(self, index: int) -> float:
+        """Triangle-wave index into the trace: forward, back, forward, ..."""
+        n = len(self.trace)
+        if n == 1:
+            return float(self.trace[0])
+        period = 2 * n - 2
+        pos = index % period
+        return float(self.trace[pos if pos < n else period - pos])
+
     def next(self) -> float:
         if self.index < len(self.trace):
             value = float(self.trace[self.index])
-            self.index += 1
         else:
-            value = float(self.trace[-1])
             self.n_held += 1
+            value = (float(self.trace[-1]) if self.exhaustion == "hold"
+                     else self._reflected(self.index))
+        self.index += 1
         return value
 
     def describe(self) -> Dict[str, Any]:
@@ -113,7 +151,10 @@ class TraceMoodSource:
             "source": self.source_path,
             "length": len(self.trace),
             "consumed": self.index,
-            "held_final": self.n_held,
+            "exhaustion": self.exhaustion,
+            "held_final": self.n_held,          # steps served from padding
+            "frac_padded": (round(self.n_held / self.index, 4)
+                            if self.index else 0.0),
             "trace_mean": float(self.trace.mean()),
             "trace_std": float(self.trace.std()),
         }
@@ -280,6 +321,7 @@ def build_mood_source(
     bounds: Tuple[float, float] = (-1.0, 1.0),
     seed: Optional[int] = None,
     ou_params: Optional[Dict[str, float]] = None,
+    exhaustion: str = "reflect",
 ) -> Any:
     """Construct the mood source for a yoked run.
 
@@ -289,6 +331,8 @@ def build_mood_source(
             replay_trace; for ou_process, used to fit μ/σ/φ unless explicit
             ou_params are given.
         bounds: mood clip range, matched to the emotional agent's.
+        exhaustion: 'reflect' | 'hold' — what a replayed trace does once the
+            recipient outlives it. See :class:`TraceMoodSource`.
         seed: seed for the OU process's private RNG.
         ou_params: explicit {'mu', 'sigma', 'phi'}, skipping the fit.
     """
@@ -304,8 +348,12 @@ def build_mood_source(
         if len(trace_paths) > 1:
             traces = load_mood_traces(trace_paths)
             longest = int(np.argmax([len(t) for t in traces]))
-            return TraceMoodSource(traces[longest], source_path=str(trace_paths[longest]))
-        return TraceMoodSource(load_mood_trace(trace_paths[0]), source_path=str(trace_paths[0]))
+            return TraceMoodSource(traces[longest],
+                                   source_path=str(trace_paths[longest]),
+                                   exhaustion=exhaustion)
+        return TraceMoodSource(load_mood_trace(trace_paths[0]),
+                               source_path=str(trace_paths[0]),
+                               exhaustion=exhaustion)
 
     if ou_params:
         return OUMoodSource(bounds=bounds, seed=seed, **ou_params)

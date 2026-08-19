@@ -57,6 +57,7 @@ def run_study(
     non_protective_trap: Optional[float] = -60.0,
     reward_overrides: Optional[Dict[str, float]] = None,
     yoked_mode: str = "replay_trace",
+    yoked_exhaustion: str = "reflect",
     image_size: int = 64,
     network_size: str = "standard",
     log_dir: str = "experiments",
@@ -131,6 +132,7 @@ def run_study(
                                  "skipped": True, "error": "missing donor trace"})
                     continue
                 run_config["yoked_mode"] = yoked_mode
+                run_config["yoked_exhaustion"] = yoked_exhaustion
                 run_config["yoked_traces"] = [str(donor_trace)]
 
             t0 = time.time()
@@ -214,6 +216,7 @@ def _write_study_manifest(study_dir: Path, scope: Dict[str, Any]) -> Dict[str, A
         "non_protective_trap": scope["non_protective_trap"],
         "reward_overrides": scope["reward_overrides"],
         "yoked_mode": scope["yoked_mode"],
+        "yoked_exhaustion": scope["yoked_exhaustion"],
         "config": scope["config"],
         "study_dir": str(scope["study_dir"]),
         "runs": scope["rows"],
@@ -238,6 +241,9 @@ def main():
     parser.add_argument("--buffer_size", type=int, default=12000)
     parser.add_argument("--non_protective_trap", type=float, default=-60.0)
     parser.add_argument("--reward", action="append", default=None)
+    parser.add_argument("--yoked_exhaustion", type=str, default="reflect",
+                        choices=["reflect", "hold"],
+                        help="Padding once a yoked run outlives its donor trace.")
     parser.add_argument("--yoked_mode", type=str, default="replay_trace",
                         choices=["replay_trace", "ou_process"])
     parser.add_argument("--image_size", type=int, default=64)
@@ -272,6 +278,7 @@ def main():
         non_protective_trap=args.non_protective_trap,
         reward_overrides=_parse_reward_overrides(args.reward),
         yoked_mode=args.yoked_mode,
+        yoked_exhaustion=args.yoked_exhaustion,
         image_size=args.image_size,
         network_size=args.network_size,
         log_dir=args.log_dir,

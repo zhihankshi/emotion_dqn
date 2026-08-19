@@ -643,6 +643,9 @@ def main():
     parser.add_argument("--bootstrap_on_truncation", action="store_true",
                         help="Treat timeouts as non-terminal in the value target "
                              "(all agent types); default off preserves old behavior")
+    parser.add_argument("--yoked_exhaustion", type=str, default="reflect",
+                        choices=["reflect", "hold"],
+                        help="Padding once a yoked run outlives its donor trace.")
     parser.add_argument("--yoked_mode", type=str, default="replay_trace",
                         choices=["replay_trace", "ou_process"])
     parser.add_argument("--yoked_trace", type=str, nargs="+", default=None)
@@ -663,6 +666,7 @@ def main():
         "reward_scale": args.reward_scale,
         "bootstrap_on_truncation": args.bootstrap_on_truncation,
         "yoked_mode": args.yoked_mode,
+        "yoked_exhaustion": args.yoked_exhaustion,
         "yoked_traces": args.yoked_trace,
     }
 

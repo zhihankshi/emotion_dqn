@@ -119,6 +119,7 @@ def create_agent(
             # the shared training seed; the global stream stays untouched.
             seed=None if seed is None else seed + 10_000,
             ou_params=config.get('yoked_ou_params'),
+            exhaustion=config.get('yoked_exhaustion', 'reflect'),
         )
         return YokedDQNAgent(**common_params, **mood_params, mood_source=mood_source)
 
@@ -567,6 +568,12 @@ def main():
                        help='Integrate |delta| (arousal) instead of signed delta (valence)')
 
     # Yoked mood control
+    parser.add_argument('--yoked_exhaustion', type=str, default='reflect',
+                        choices=['reflect', 'hold'],
+                        help="What a replayed donor trace does once the yoked run "
+                             "outlives it: 'reflect' mirrors it (keeps the donor's "
+                             "distribution), 'hold' pins M at the donor's last value "
+                             "(legacy; degrades the control to a constant).")
     parser.add_argument('--yoked_mode', type=str, default='replay_trace',
                        choices=['replay_trace', 'ou_process'],
                        help='How the yoked agent gets its mood: replay a recorded '
@@ -601,6 +608,7 @@ def main():
         'reward_scale': args.reward_scale,
         'bootstrap_on_truncation': args.bootstrap_on_truncation,
         'yoked_mode': args.yoked_mode,
+        'yoked_exhaustion': args.yoked_exhaustion,
         'yoked_traces': args.yoked_trace,
         'double_dqn': args.double_dqn,
         'epsilon_end': args.epsilon_end,
