@@ -18,7 +18,7 @@ module reset
 module load anaconda3/2024.02-1
 conda activate honeylab
 
-cd ~/emotional_dqn
+cd "$SLURM_SUBMIT_DIR"
 
 SEEDS=(0 1 2 3 4)
 SEED=${SEEDS[$SLURM_ARRAY_TASK_ID]}

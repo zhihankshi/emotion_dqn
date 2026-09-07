@@ -25,7 +25,7 @@ SCRATCH_ROOT=$HOME/emotional_dqn_runs
 OUTPUT_DIR=${SCRATCH_ROOT}/reversal_runs/test_emotional_seed0
 mkdir -p "$OUTPUT_DIR"
 
-cd ~/emotional_dqn
+cd "$SLURM_SUBMIT_DIR"
 
 python scripts/train_reversal.py \
     --agent-type emotional \

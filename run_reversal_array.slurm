@@ -18,7 +18,7 @@ module reset
 module load anaconda3/2024.02-1
 conda activate honeylab
 
-cd ~/emotional_dqn
+cd "$SLURM_SUBMIT_DIR"
 
 # --- map SLURM_ARRAY_TASK_ID -> (agent_type, seed) ---
 AGENT_TYPES=(baseline emotional)
