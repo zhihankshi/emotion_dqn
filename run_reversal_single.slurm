@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=reversal_test
-#SBATCH --account=YOUR_ACCOUNT_HERE          # TODO: from `sacctmgr show associations user=$USER`
+#SBATCH --account=zshi47          # TODO: from `sacctmgr show associations user=$USER`
 #SBATCH --partition=a100                     # a100 or l40s; no need for h100/h200/b200 here
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
@@ -9,7 +9,7 @@
 #SBATCH --output=logs/reversal_test_%j.out
 #SBATCH --error=logs/reversal_test_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=YourEmail@jhu.edu         # TODO
+#SBATCH --mail-user=zshi47@jhu.edu         # TODO
 
 mkdir -p logs
 
@@ -17,12 +17,15 @@ module reset
 module load anaconda3/2024.02-1              # TODO: match to `module avail anaconda3` output
 conda activate honeylab
 
-# Where this run's checkpoints/logs live. Prefer scratch over $HOME for I/O-heavy output —
-# TODO: replace with your actual scratch path once confirmed via `df -h` or ARCH support.
-OUTPUT_DIR=${SCRATCH:-$HOME}/honey_lab/reversal_runs/test_emotional_seed0
+# TEMPORARY: scratch access at /weka/scratch/jhu/$USER isn't provisioned yet (permission
+# denied as of last check) — falling back to home. 86G quota is fine for a pilot/first pass.
+# Once ARCH provisions scratch access, switch this back to:
+#   SCRATCH_ROOT=/weka/scratch/jhu/$USER
+SCRATCH_ROOT=$HOME/emotional_dqn_runs
+OUTPUT_DIR=${SCRATCH_ROOT}/reversal_runs/test_emotional_seed0
 mkdir -p "$OUTPUT_DIR"
 
-cd ~/honey-lab   # TODO: your repo path
+cd ~/emotional_dqn
 
 python scripts/train_reversal.py \
     --agent-type emotional \

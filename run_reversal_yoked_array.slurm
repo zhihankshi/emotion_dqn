@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=reversal_yoked
-#SBATCH --account=YOUR_ACCOUNT_HERE          # TODO
+#SBATCH --account=zshi47          
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
@@ -10,7 +10,7 @@
 #SBATCH --output=logs/reversal_yoked_%A_%a.out
 #SBATCH --error=logs/reversal_yoked_%A_%a.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=YourEmail@jhu.edu         # TODO
+#SBATCH --mail-user=zshi47@jhu.edu         
 
 mkdir -p logs
 
@@ -18,7 +18,7 @@ module reset
 module load anaconda3/2024.02-1
 conda activate honeylab
 
-cd ~/honey-lab   # TODO: your repo path
+cd ~/emotional_dqn
 
 SEEDS=(0 1 2 3 4)
 SEED=${SEEDS[$SLURM_ARRAY_TASK_ID]}
@@ -29,7 +29,10 @@ N_SEEDS=${#SEEDS[@]}
 TRACE_SEED_IDX=$(( (SLURM_ARRAY_TASK_ID + 1) % N_SEEDS ))
 TRACE_SEED=${SEEDS[$TRACE_SEED_IDX]}
 
-RUNS_ROOT=${SCRATCH:-$HOME}/honey_lab/reversal_runs
+# TEMPORARY: scratch access at /weka/scratch/jhu/$USER isn't provisioned yet — using home.
+# Switch back to /weka/scratch/jhu/$USER once ARCH confirms access.
+SCRATCH_ROOT=$HOME/emotional_dqn_runs
+RUNS_ROOT=${SCRATCH_ROOT}/reversal_runs
 MOOD_TRACE_PATH="${RUNS_ROOT}/emotional_seed${TRACE_SEED}/mood_trace.json"
 
 if [ ! -f "$MOOD_TRACE_PATH" ]; then
